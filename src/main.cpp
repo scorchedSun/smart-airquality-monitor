@@ -94,9 +94,12 @@ bool is_setup(false);
 bool mqtt_configured(false);
 bool discovery_messages_sent(false);
 bool web_portal_requested(false);
-bool enable_display(true);
+bool display_enabled(true);
+bool display_setup(false);
 
 void add_details_on_display() {
+  if (!display_enabled || !display_setup) return;
+
   if (!ip_address.empty()) {
     display.setCursor(0,0);
     display.print("IP: ");
@@ -105,6 +108,8 @@ void add_details_on_display() {
 }
 
 void show_on_display(const std::string& value) {
+  if (!display_enabled || !display_setup) return;
+
   display.clearDisplay();
   add_details_on_display();
   display.setCursor(5,28);
@@ -113,6 +118,8 @@ void show_on_display(const std::string& value) {
 }
 
 void show_wait_animation(const std::string title, const uint32_t time_millis) {
+  if (!display_enabled || !display_setup) return;
+
   uint32_t start_time = millis();
   uint8_t animation_index = 0;
   uint8_t max_animation_index = (uint8_t)wait_animation_chars.size();
@@ -141,11 +148,15 @@ void register_handlers() {
 }
 
 void setup_display() {
+  if (display_setup) return;
+
   if (!display.begin(SSD1306_SWITCHCAPVCC))
   {
     LOG_E("Display could not be set up.");
     for (;;);
   }
+
+  display_setup = true;
 
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -154,8 +165,16 @@ void setup_display() {
   delay(100);
 }
 
+void turn_display_off() {
+  display.ssd1306_command(SSD1306_DISPLAYOFF);
+}
+
+void turn_display_on() {
+  display.ssd1306_command(SSD1306_DISPLAYON);
+}
+
 void read_device_configuration() {
-  enable_display = config["enable_display"].toInt();
+  display_enabled = config["enable_display"].toInt();
   report_interval_in_millis = config["report_interval"].toInt() * 60 * 1000;
   display_each_measurement_for_in_millis = config["display_interval"].toInt() * 1000;
 }
@@ -197,13 +216,8 @@ void setup() {
   Serial.print("\n\n\n\n");
   Serial.flush();
 
-  setup_display();
-
-  show_on_display("Booting ...");
-
   if (!SPIFFS.begin(true)) {
     LOG_E("Filesystem could not be mounted.");
-    show_on_display("Filesystem could not be mounted.");
     for (;;);
   }
   
@@ -220,12 +234,23 @@ void setup() {
     ip_address = WiFi.softAPIP().toString().c_str();
     std::string message("Connecting to WiFi failed. Configure via AP '%s'");
     std::snprintf(nullptr, 0, message.c_str(), WiFi.softAPSSID().c_str());
+    setup_display();
     show_on_display(message);
     return;
   }  
 
   ip_address = std::string(WiFi.localIP().toString().c_str());
   mac_id = config.getMacID().c_str();
+
+  read_device_configuration();
+
+  setup_display();
+
+  if (display_enabled && display_setup) {
+    show_on_display("Booting ...");
+  } else {
+    turn_display_off();
+  }
 
   std::string friendly_name(config["friendly_name"].c_str());
 
