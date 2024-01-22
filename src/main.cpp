@@ -11,6 +11,9 @@
 #include <cctype>
 #include <functional>
 
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+
 #include "WebServer.h"
 #include "Arduino.h"
 #include "MHZ19.h"
@@ -97,6 +100,8 @@ bool web_portal_requested(false);
 bool display_enabled(true);
 bool display_setup(false);
 
+const std::string device_classes_of_measurement_types[6] = {"temperature", "humidity", "pm1", "pm25", "pm10", "carbon_dioxide"};
+
 void add_details_on_display() {
   if (!display_enabled || !display_setup) return;
 
@@ -118,22 +123,22 @@ void show_on_display(const std::string& value) {
 }
 
 void show_wait_animation(const std::string title, const uint32_t time_millis) {
-  if (!display_enabled || !display_setup) return;
-
   uint32_t start_time = millis();
   uint8_t animation_index = 0;
   uint8_t max_animation_index = (uint8_t)wait_animation_chars.size();
 
   while (millis() - start_time <= time_millis) {
-    display.clearDisplay();
-    add_details_on_display();
-    display.setCursor(0,16);
-    display.println(title.c_str());
-    display.setCursor(60, 36);
-    display.print(wait_animation_chars.at(animation_index));
-    display.display();
+    if (display_enabled && display_setup) {
+      display.clearDisplay();
+      add_details_on_display();
+      display.setCursor(0,16);
+      display.println(title.c_str());
+      display.setCursor(60, 36);
+      display.print(wait_animation_chars.at(animation_index));
+      display.display();
+      animation_index = ++animation_index % max_animation_index;
+    }
     delay(100);
-    animation_index = ++animation_index % max_animation_index;
   }
 }
 
@@ -174,7 +179,7 @@ void turn_display_on() {
 }
 
 void read_device_configuration() {
-  display_enabled = config["enable_display"].toInt();
+  display_enabled = config.exists("enable_display") ? config["enable_display"].toInt() : true;
   report_interval_in_millis = config["report_interval"].toInt() * 60 * 1000;
   display_each_measurement_for_in_millis = config["display_interval"].toInt() * 1000;
 }
@@ -216,6 +221,8 @@ void setup() {
   Serial.print("\n\n\n\n");
   Serial.flush();
 
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+
   if (!SPIFFS.begin(true)) {
     LOG_E("Filesystem could not be mounted.");
     for (;;);
@@ -256,11 +263,20 @@ void setup() {
 
   home_assistant_device = std::unique_ptr<HomeAssistantDevice>(new HomeAssistantDevice(device_prefix, mac_id, friendly_name, app_version));
 
+  home_assistant_device->register_sensor(std::unique_ptr<HomeAssistantSensorDefinition>(new HomeAssistantSensorDefinition("Temperature", "temp", "temperature", "°C")));
+  home_assistant_device->register_sensor(std::unique_ptr<HomeAssistantSensorDefinition>(new HomeAssistantSensorDefinition("Humidity", "hum", "humidity", "%")));
+  home_assistant_device->register_sensor(std::unique_ptr<HomeAssistantSensorDefinition>(new HomeAssistantSensorDefinition("PM1", "pm1", "pm1", "µg/m³")));
+  home_assistant_device->register_sensor(std::unique_ptr<HomeAssistantSensorDefinition>(new HomeAssistantSensorDefinition("PM2.5", "pm25", "pm25", "µg/m³")));
+  home_assistant_device->register_sensor(std::unique_ptr<HomeAssistantSensorDefinition>(new HomeAssistantSensorDefinition("PM10", "pm10", "pm10", "µg/m³")));
+  home_assistant_device->register_sensor(std::unique_ptr<HomeAssistantSensorDefinition>(new HomeAssistantSensorDefinition("CO2", "co2", "carbon_dioxide", "ppm")));
+
   setup_mqtt(home_assistant_device->get_device_id(), home_assistant_device->get_sensor_state_topic());
 
   measurement_reporters.push_back(std::unique_ptr<ValueReporter>(new SerialReporter(friendly_name)));
   
   initialize_sensors();
+
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); //enable brownout detector
 
   is_setup = true;
 }
@@ -366,10 +382,8 @@ void show_on_display(const std::unique_ptr<Measurement>& measurement) {
 }
 
 bool send_discovery_messages() {
-  Measurement::Type types[6] = { Measurement::Type::Temperature, Measurement::Type::Humidity, Measurement::Type::PM1, Measurement::Type::PM25, Measurement::Type::PM10, Measurement::Type::CO2 };
-
-  for (const auto& type : types) {
-    ReconnectingPubSubClient::Error publish_error = reconnecting_mqtt_client->publish(home_assistant_device->get_discovery_topic_for(type), home_assistant_device->get_discovery_message_for_sensor(type));
+  for (const auto& sensor_definition : home_assistant_device->sensor_definitions()) {
+    ReconnectingPubSubClient::Error publish_error = reconnecting_mqtt_client->publish(home_assistant_device->get_discovery_topic_for(sensor_definition), home_assistant_device->get_discovery_message_for_sensor(sensor_definition));
 
     if (publish_error != ReconnectingPubSubClient::Error::None) {
       Serial.println("Unable to publish discovery messages");
@@ -392,7 +406,6 @@ void loop() {
     }
 
     if (should_read_new_measurements()) {
-      
       measurements.clear();
 
       read_temperature_and_humidity();
@@ -401,7 +414,7 @@ void loop() {
 
       DynamicJsonDocument measurements_json(1024);
       for (const auto& measurement : measurements) {
-        measurements_json[home_assistant_device->get_key_for(measurement->get_type())] = measurement->value_as_string();
+        measurements_json[device_classes_of_measurement_types[(uint16_t)measurement->get_type()]] = measurement->value_as_string();
 
         show_on_display(measurement);
       }

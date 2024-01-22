@@ -10,9 +10,31 @@
 #include "ReconnectingPubSubClient.h"
 
 static const char default_discovery_prefix[] = "homeassistant";
-static const std::string abbrevations_of_measurement_types[6] = {"temp", "hum", "pm1", "pm25", "pm10", "co2"};
-static const std::string device_classes_of_measurement_types[6] = {"temperature", "humidity", "pm1", "pm25", "pm10", "carbon_dioxide"};
-static const std::string units_of_measurements[6] = {"°C", "%", "µg/m³", "µg/m³", "µg/m³", "ppm"};
+
+class HomeAssistantSensorDefinition {
+
+private:
+    const std::string _name;
+    const std::string _abbreviated_name;
+    const std::string _device_class;
+    const std::string _unit_of_measurement;
+
+public:
+    HomeAssistantSensorDefinition(const std::string& name,
+                                  const std::string& abbreviated_name,
+                                  const std::string& device_class,
+                                  const std::string& unit_of_measurement) 
+        : _name(name)
+        , _abbreviated_name(abbreviated_name)
+        , _device_class(device_class)
+        , _unit_of_measurement(unit_of_measurement) {
+    }
+
+    const std::string& name() const { return _name; }
+    const std::string& abbreviated_name() const { return _abbreviated_name; }
+    const std::string& device_class() const { return _device_class; }
+    const std::string& unit_of_measurement() const { return _unit_of_measurement; }
+};
 
 class HomeAssistantDevice {
 
@@ -25,6 +47,7 @@ private:
     const std::string topic_base;
     const std::string sensor_state_topic;
     DynamicJsonDocument device_json;
+    std::vector<std::unique_ptr<HomeAssistantSensorDefinition>> _sensor_definitions;
 
 public:
 
@@ -50,26 +73,29 @@ public:
         device_json["sw"] = software_version;
     }
 
-    DynamicJsonDocument get_discovery_message_for_sensor(const Measurement::Type& measurement_type) const {
+    void register_sensor(std::unique_ptr<HomeAssistantSensorDefinition>&& sensor_definition) {
+        _sensor_definitions.push_back(std::move(sensor_definition));
+    }
 
-        const uint16_t type_index((uint16_t)measurement_type);
-        const std::string device_class(device_classes_of_measurement_types[type_index]);
+    DynamicJsonDocument get_discovery_message_for_sensor(const std::unique_ptr<HomeAssistantSensorDefinition>& sensor_definition) const {
+        const std::string& device_class = sensor_definition->device_class();
 
         DynamicJsonDocument discovery_json(1024);
         discovery_json["dev"] = device_json;
-        discovery_json["name"] = Measurement::HumanReadableFormatter::format(measurement_type);
-        discovery_json["uniq_id"] = std::string(abbrevations_of_measurement_types[type_index]).append("_").append(mac_id);
-        discovery_json["dev_cla"] = device_class,
+        discovery_json["name"] = sensor_definition->name();
+        discovery_json["uniq_id"] = std::string(sensor_definition->abbreviated_name()).append("_").append(mac_id);
+        discovery_json["dev_cla"] = device_class;
         discovery_json["val_tpl"] = std::string("{{ value_json.").append(device_class).append(" }}");
-        discovery_json["unit_of_meas"] = units_of_measurements[type_index];
+        discovery_json["unit_of_meas"] = sensor_definition->unit_of_measurement();
         discovery_json["stat_t"] = sensor_state_topic;
 
         return discovery_json;
     }
 
-    std::string get_discovery_topic_for(const Measurement::Type& type) const {
-        const uint16_t type_index((uint16_t)type);
-        return std::string(topic_base).append(device_id).append("/").append(abbrevations_of_measurement_types[type_index]).append("/config");
+    const std::vector<std::unique_ptr<HomeAssistantSensorDefinition>>& sensor_definitions() const { return _sensor_definitions; }
+
+    std::string get_discovery_topic_for(const std::unique_ptr<HomeAssistantSensorDefinition>& sensor_definition) const {
+        return std::string(topic_base).append(device_id).append("/").append(sensor_definition->abbreviated_name()).append("/config");
     }
 
     std::string get_device_id() const {
@@ -78,9 +104,5 @@ public:
 
     std::string get_sensor_state_topic() const {
         return sensor_state_topic;
-    }
-
-    std::string get_key_for(const Measurement::Type& type) const {
-        return device_classes_of_measurement_types[(uint16_t)type];
     }
 };
