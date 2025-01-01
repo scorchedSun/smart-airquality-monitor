@@ -26,6 +26,7 @@
 #include "PubSubClient.h"
 #include "ConfigAssist.h"
 #include "ConfigAssistHelper.h"
+#include "driver/ledc.h"
 
 #include "user-variables.h"
 #include "ReconnectingPubSubClient.h"
@@ -48,6 +49,9 @@
 
 #define PMS_RX_ATTACHED_TO 26
 #define PMS_TX_ATTACHED_TO 27
+
+#define FAN_PWM_PIN 13
+#define FAN_MAX_SPEED 1000
 
 static const std::string app_version = "1.0.0";
 
@@ -227,6 +231,28 @@ void setup() {
     LOG_E("Filesystem could not be mounted.");
     for (;;);
   }
+
+  ledc_timer_config_t timer = {
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .duty_resolution = LEDC_TIMER_10_BIT,
+    .timer_num = LEDC_TIMER_0,
+    .freq_hz = 25000,
+    .clk_cfg = LEDC_AUTO_CLK
+  };
+
+  ledc_timer_config(&timer);
+
+  ledc_channel_config_t channel = {
+    .gpio_num = FAN_PWM_PIN,
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .channel = LEDC_CHANNEL_0,
+    .timer_sel = LEDC_TIMER_0,
+    .duty = 205,
+    .hpoint = 0
+  };
+
+  ledc_channel_config(&channel);
+
   
   ConfigAssistHelper config_helper(config);
   bool wifi_connected = config_helper.connectToNetwork();
