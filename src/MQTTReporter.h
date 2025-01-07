@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ArduinoJson.h>
+#include "Logger.h"
 
 #include "ValueReporter.h"
 #include "ReconnectingPubSubClient.h"
@@ -22,6 +23,8 @@ class MQTTReporter : public ValueReporter {
         void report(const JsonDocument& data) const override {
             if (WiFi.isConnected()) {
                 mqtt_client->publish(topic, data);
+            } else {
+                logger.log(Logger::Level::Warning, "Cannot publish data to MQTT since WiFi is not connected.");
             }
         }
 };

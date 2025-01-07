@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "ArduinoJson.h"
+#include "Logger.h"
 
 #include <PubSubClient.h>
 
@@ -24,16 +25,13 @@ class ReconnectingPubSubClient {
             while (!mqtt_client->connected() && client_state < 0 && max_reconnect_attempts > number_of_connection_attempts + 1) {
                 if (!mqtt_client->connect(client_id.c_str(), mqtt_user.c_str(), mqtt_password.c_str())) {
                     client_state = mqtt_client->state();
-                    Serial.print("Failed to connect to MQTT with state: ");
-                    Serial.println(client_state);
+
+                    logger.log(Logger::Level::Warning, "Failed to connect to MQTT: {}", client_state);
+
                     delay(fixed_delay_between_reconnect_attempts_in_ms);
                     number_of_connection_attempts++;
 
-                    Serial.print("Tried connecting ");
-                    Serial.print(number_of_connection_attempts);
-                    Serial.print(" of ");
-                    Serial.print(max_reconnect_attempts);
-                    Serial.println(" times.");
+                    logger.log(Logger::Level::Debug, "Tried connecting {} of {} times.", number_of_connection_attempts, max_reconnect_attempts);
                 }
             }
             return mqtt_client->connected();
@@ -41,7 +39,7 @@ class ReconnectingPubSubClient {
 
 
     public:
-        enum class Error { None, ReconnectFailed };
+        enum class Error { None, ReconnectFailed, PublishFailed };
 
         ReconnectingPubSubClient(const std::shared_ptr<PubSubClient> mqtt_client,
                                  const std::string& mqtt_user,
@@ -57,19 +55,17 @@ class ReconnectingPubSubClient {
             , max_reconnect_attempts(max_reconnect_attempts) {
         }
 
-        Error publish(const std::string& topic, const JsonDocument& data) {
+        Error publish(const std::string& topic, const JsonDocument& data, bool retain = false) {
             if (establish_connection_to_broker()) {
-                Serial.println(std::string("Publishing message to ").append(topic).c_str());
+                logger.log(Logger::Level::Debug, "Publishing {}message to topic {}...", retain ? "retained " : "", topic);
 
                 std::string buffer;
                 const size_t size = serializeJson(data, buffer);
 
-                Serial.println(buffer.c_str());
-                Serial.println(size);
+                if (!mqtt_client->publish(topic.c_str(), buffer.c_str(), retain)) {
+                    logger.log(Logger::Level::Warning, "Publishing of message failed: {}", mqtt_client->getWriteError());
 
-                if (!mqtt_client->publish(topic.c_str(), buffer.c_str())) {
-                    Serial.println("Publish failed!");
-                    Serial.println(mqtt_client->getWriteError());
+                    return Error::PublishFailed;
                 }
 
                 return Error::None;

@@ -37,5 +37,16 @@ Device settings:
         default: 10
     - enable_display:
         label: Turn off if you don't want to show anything on the display (f.e. at night)
-        default: True
+        checked: True
+
+Logging settings:
+    - syslog_server_ip:
+        label: IP address of the logging server. Leave blank to disable feature.
+        default: ""
+    - syslog_server_port:
+        label: Port of the logging server
+        default: 514
+    - log_level:
+        label: Maximum level of log messages to report ["Error", "Warning", "Debug"]. 
+        default: "Error"
 )~";

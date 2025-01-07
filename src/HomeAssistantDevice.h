@@ -11,7 +11,7 @@
 
 static const char default_discovery_prefix[] = "homeassistant";
 
-class HomeAssistantSensorDefinition {
+class SensorDefinition {
 
 private:
     const std::string _name;
@@ -20,7 +20,7 @@ private:
     const std::string _unit_of_measurement;
 
 public:
-    HomeAssistantSensorDefinition(const std::string& name,
+    SensorDefinition(const std::string& name,
                                   const std::string& abbreviated_name,
                                   const std::string& device_class,
                                   const std::string& unit_of_measurement) 
@@ -47,7 +47,7 @@ private:
     const std::string topic_base;
     const std::string sensor_state_topic;
     DynamicJsonDocument device_json;
-    std::vector<std::unique_ptr<HomeAssistantSensorDefinition>> _sensor_definitions;
+    std::vector<std::unique_ptr<SensorDefinition>> _sensor_definitions;
 
 public:
 
@@ -73,11 +73,11 @@ public:
         device_json["sw"] = software_version;
     }
 
-    void register_sensor(std::unique_ptr<HomeAssistantSensorDefinition>&& sensor_definition) {
+    void register_sensor(std::unique_ptr<SensorDefinition>&& sensor_definition) {
         _sensor_definitions.push_back(std::move(sensor_definition));
     }
 
-    DynamicJsonDocument get_discovery_message_for_sensor(const std::unique_ptr<HomeAssistantSensorDefinition>& sensor_definition) const {
+    DynamicJsonDocument get_discovery_message_for_sensor(const std::unique_ptr<SensorDefinition>& sensor_definition) const {
         const std::string& device_class = sensor_definition->device_class();
 
         DynamicJsonDocument discovery_json(1024);
@@ -92,9 +92,9 @@ public:
         return discovery_json;
     }
 
-    const std::vector<std::unique_ptr<HomeAssistantSensorDefinition>>& sensor_definitions() const { return _sensor_definitions; }
+    const std::vector<std::unique_ptr<SensorDefinition>>& sensor_definitions() const { return _sensor_definitions; }
 
-    std::string get_discovery_topic_for(const std::unique_ptr<HomeAssistantSensorDefinition>& sensor_definition) const {
+    std::string get_discovery_topic_for(const std::unique_ptr<SensorDefinition>& sensor_definition) const {
         return std::string(topic_base).append(device_id).append("/").append(sensor_definition->abbreviated_name()).append("/config");
     }
 
