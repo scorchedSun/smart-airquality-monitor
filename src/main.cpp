@@ -32,6 +32,7 @@
 #include "Measurement.h"
 #include "HomeAssistantDevice.h"
 #include "Logger.h"
+#include "Fan.h"
 
 // OLED -> GND | VCC | SCK | SDA | RES | DC | CS
 #define OLED_MOSI   23  // SDA
@@ -48,7 +49,7 @@
 #define PMS_TX_ATTACHED_TO 27
 
 #define FAN_PWM_PIN 13
-#define FAN_MAX_SPEED 1000
+#define FAN_FREQUENCY_HZ 25000
 
 static const std::string app_version = "1.0.0";
 
@@ -72,6 +73,8 @@ SerialPM pms(PMS5003, PMS_TX_ATTACHED_TO, PMS_RX_ATTACHED_TO);
 Adafruit_SSD1306 display(128, 64, OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 
 DHT20 dht20;
+
+Fan fan(FAN_PWM_PIN, FAN_FREQUENCY_HZ);
 
 time_t data_last_read_timestamp;
 uint32_t report_interval_in_seconds(300);   // 5 minutes
@@ -240,27 +243,7 @@ void setup() {
   Serial.print("\n\n\n\n");
   Serial.flush();
 
-  ledc_timer_config_t timer = {
-    .speed_mode = LEDC_LOW_SPEED_MODE,
-    .duty_resolution = LEDC_TIMER_10_BIT,
-    .timer_num = LEDC_TIMER_0,
-    .freq_hz = 25000,
-    .clk_cfg = LEDC_AUTO_CLK
-  };
-
-  ledc_timer_config(&timer);
-
-  ledc_channel_config_t channel = {
-    .gpio_num = FAN_PWM_PIN,
-    .speed_mode = LEDC_LOW_SPEED_MODE,
-    .channel = LEDC_CHANNEL_0,
-    .timer_sel = LEDC_TIMER_0,
-    .duty = 205,
-    .hpoint = 0
-  };
-
-  ledc_channel_config(&channel);
-
+  fan.begin(20);
   
   ConfigAssistHelper config_helper(config);
   bool wifi_connected = config_helper.connectToNetwork();
