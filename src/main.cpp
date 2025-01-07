@@ -53,7 +53,6 @@
 
 static const std::string app_version = "1.0.0";
 
-static const std::string ap_password("12345");
 static const uint16_t wifi_configuration_timeout_in_seconds(300);
 static const uint16_t sensor_warmup_millis(2000);
 static const std::string co2_unit("ppm");
