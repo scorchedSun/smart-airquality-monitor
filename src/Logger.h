@@ -13,7 +13,7 @@ public:
     enum class Level { Error, Warning, Debug };
 
     static constexpr bool try_get_level_by_name(std::string_view name, Level& level) {
-        static const std::unordered_map<std::string_view, Level> const name_to_level = { { "Error", Level::Error }, {"Warning", Level::Warning}, {"Debug", Level::Debug} };
+        static const std::unordered_map<std::string_view, Level> name_to_level = { { "Error", Level::Error }, {"Warning", Level::Warning}, {"Debug", Level::Debug} };
 
         auto it = name_to_level.find(name);
         if (it == name_to_level.cend()) {
