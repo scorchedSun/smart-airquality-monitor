@@ -25,7 +25,7 @@ MQTT settings:
 
 Device settings:
     - friendly_name: 
-        label: Friendly name of the device. 
+        label: Friendly name of the device
         default: "Smart Air Quality Monitor"
     - report_interval:
         label: Interval in which new values will be reported (in minutes)
@@ -41,12 +41,16 @@ Device settings:
 
 Logging settings:
     - syslog_server_ip:
-        label: IP address of the logging server. Leave blank to disable feature.
+        label: IP address of the logging server. Leave blank to disable logging to a server
         default: ""
     - syslog_server_port:
         label: Port of the logging server
         default: 514
     - log_level:
-        label: Maximum level of log messages to report ["Error", "Warning", "Debug"]. 
-        default: "Error"
+        label: Maximum level of log messages to report 
+        options:
+            - Error: 0
+            - Warning: 1
+            - Debug: 2
+        default: Error
 )~";
