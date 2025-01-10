@@ -12,10 +12,7 @@
 
 #include "WebServer.h"
 #include "Arduino.h"
-#include "MHZ19.h"
 #include "SoftwareSerial.h"
-#include "PMserial.h"
-#include "DHT20.h"
 #include "Adafruit_SSD1306.h"
 #include "ArduinoJson.h"
 #include "PubSubClient.h"
@@ -27,12 +24,15 @@
 #include "user-variables.h"
 #include "ReconnectingPubSubClient.h"
 #include "ValueReporter.h"
-#include "SerialReporter.h"
-#include "MQTTReporter.h"
 #include "Measurement.h"
 #include "HomeAssistantDevice.h"
+#include "HomeAssistantSensorReporter.h"
 #include "Logger.h"
 #include "Fan.h"
+#include "DHT20Wrapper.h"
+#include "MHZ19Wrapper.h"
+#include "PMWrapper.h"
+#include "Translator.h"
 
 // OLED -> GND | VCC | SCK | SDA | RES | DC | CS
 #define OLED_MOSI   23  // SDA
@@ -64,14 +64,7 @@ static const std::string device_prefix("smaq_");
 WiFiClient wifi_client;
 PubSubClient mqtt_client(wifi_client);
 
-MHZ19 mhz19;
-SoftwareSerial mhz19_serial(MHZ19_TX_ATTACHED_TO, MHZ19_RX_ATTACHED_TO);
-
-SerialPM pms(PMS5003, PMS_TX_ATTACHED_TO, PMS_RX_ATTACHED_TO); 
-
 Adafruit_SSD1306 display(128, 64, OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
-
-DHT20 dht20;
 
 Fan fan(FAN_PWM_PIN, FAN_FREQUENCY_HZ);
 
@@ -79,7 +72,7 @@ time_t data_last_read_timestamp;
 uint32_t report_interval_in_seconds(300);   // 5 minutes
 uint32_t display_each_measurement_for_in_millis(10000);  // 10 seconds
 
-std::unique_ptr<HomeAssistantDevice> home_assistant_device;
+std::shared_ptr<HomeAssistantDevice> home_assistant_device;
 std::shared_ptr<ReconnectingPubSubClient> reconnecting_mqtt_client;
 
 ConfigAssist config(CA_DEF_CONF_FILE, VARIABLES_DEF_YAML);
@@ -100,6 +93,12 @@ std::uint16_t syslog_server_port;
 
 std::string log_level;
 
+DHT20Wrapper dht20;
+MHZ19Wrapper mhz19(MHZ19_RX_ATTACHED_TO, MHZ19_TX_ATTACHED_TO, MHZ19_BAUD_RATE);
+PMWrapper pms(PMS5003, PMS_TX_ATTACHED_TO, PMS_RX_ATTACHED_TO);
+DisplayUnitTranslator display_unit_translator;
+FriendlyNameTypeTranslator friendly_name_type_translator;
+
 bool should_save_config(false);
 bool is_setup(false);
 bool mqtt_configured(false);
@@ -108,8 +107,6 @@ bool web_portal_requested(false);
 bool display_enabled(true);
 bool display_setup(false);
 bool syslog_server_enabled(false);
-
-const std::string device_classes_of_measurement_types[6] = {"temperature", "humidity", "pm1", "pm25", "pm10", "carbon_dioxide"};
 
 void add_details_on_display() {
   if (!display_enabled || !display_setup) return;
@@ -205,7 +202,7 @@ void read_log_server_configuration() {
   log_level = std::string(config.exists("log_level") ? config["log_level"].c_str() : "Error");
 }
 
-void setup_mqtt(const std::string& mqtt_device_id, const std::string& sensor_state_topic) {
+void setup_mqtt(const std::string& mqtt_device_id, std::shared_ptr<HomeAssistantDevice> home_assistant_device) {
   mqtt_broker = std::string(config["mqtt_broker"].c_str());
 
   uint16_t mqtt_port(config["mqtt_port"].toInt());
@@ -217,20 +214,17 @@ void setup_mqtt(const std::string& mqtt_device_id, const std::string& sensor_sta
   if (mqtt_configured && WiFi.isConnected()) {
     mqtt_client.setServer(mqtt_broker.c_str(), mqtt_port);
     mqtt_client.setBufferSize(512);
-    reconnecting_mqtt_client = std::move(std::unique_ptr<ReconnectingPubSubClient>(new ReconnectingPubSubClient(std::make_shared<PubSubClient>(mqtt_client), mqtt_user, mqtt_password, mqtt_device_id)));
-    measurement_reporters.push_back(std::unique_ptr<ValueReporter>(new MQTTReporter(reconnecting_mqtt_client, sensor_state_topic)));
+    reconnecting_mqtt_client = std::make_shared<ReconnectingPubSubClient>(std::make_shared<PubSubClient>(mqtt_client), mqtt_user, mqtt_password, mqtt_device_id);
+    measurement_reporters.push_back(std::make_unique<HomeAssistantSensorReporter>(home_assistant_device, reconnecting_mqtt_client));
   }
 }
 
 void initialize_sensors() {
-  mhz19_serial.begin(MHZ19_BAUD_RATE);
-  mhz19.begin(mhz19_serial); 
-  mhz19.autoCalibration(false);   
-
-  pms.init();
-  pms.sleep();
+  pms.begin();  
 
   dht20.begin();  
+
+  mhz19.begin();
 
   show_wait_animation("Initializing sensors", 120000);  // Wait 2 minutes
 }
@@ -278,14 +272,7 @@ void setup() {
 
   std::string friendly_name(config["friendly_name"].c_str());
 
-  home_assistant_device = std::unique_ptr<HomeAssistantDevice>(new HomeAssistantDevice(device_prefix, mac_id, friendly_name, app_version));
-
-  home_assistant_device->register_sensor(std::unique_ptr<SensorDefinition>(new SensorDefinition("Temperature", "temp", "temperature", "°C")));
-  home_assistant_device->register_sensor(std::unique_ptr<SensorDefinition>(new SensorDefinition("Humidity", "hum", "humidity", "%")));
-  home_assistant_device->register_sensor(std::unique_ptr<SensorDefinition>(new SensorDefinition("PM1", "pm1", "pm1", "µg/m³")));
-  home_assistant_device->register_sensor(std::unique_ptr<SensorDefinition>(new SensorDefinition("PM2.5", "pm25", "pm25", "µg/m³")));
-  home_assistant_device->register_sensor(std::unique_ptr<SensorDefinition>(new SensorDefinition("PM10", "pm10", "pm10", "µg/m³")));
-  home_assistant_device->register_sensor(std::unique_ptr<SensorDefinition>(new SensorDefinition("CO2", "co2", "carbon_dioxide", "ppm")));
+  home_assistant_device = std::make_shared<HomeAssistantDevice>(device_prefix, mac_id, friendly_name, app_version);
 
   Logger::Level parsed_log_level;
 
@@ -300,9 +287,7 @@ void setup() {
     logger.setup_syslog(syslog_server_ip, syslog_server_port, mac_id, Logger::Level::Debug);
   }
 
-  setup_mqtt(home_assistant_device->get_device_id(), home_assistant_device->get_sensor_state_topic());
-
-  measurement_reporters.push_back(std::unique_ptr<ValueReporter>(new SerialReporter(friendly_name)));
+  setup_mqtt(home_assistant_device->get_device_id(), home_assistant_device);
   
   initialize_sensors();
 
@@ -315,115 +300,15 @@ bool should_read_new_measurements() {
   return data_last_read_timestamp == 0 || now - data_last_read_timestamp >= report_interval_in_seconds;
 }
 
-void report(const JsonDocument& measurements) {
-  for (auto const& reporter : measurement_reporters) {
-    reporter->report(measurements);
-  }
-}
-
-void read_co2() {
-  const uint32_t co2 = mhz19.getCO2(false);
-  
-  if (co2 > 0) {
-    measurements.push_back(std::unique_ptr<Measurement>(new RoundNumberMeasurement(Measurement::Type::CO2, co2, co2_unit)));
-  }
-}
-
-void read_temperature_and_humidity() {
-  int status = dht20.read();
-
-  switch (status)
-    {
-      case DHT20_OK:
-        measurements.push_back(std::unique_ptr<Measurement>(new DecimalMeasurement(Measurement::Type::Humidity, dht20.getHumidity(), humidity_unit)));
-        measurements.push_back(std::unique_ptr<Measurement>(new DecimalMeasurement(Measurement::Type::Temperature, dht20.getTemperature(), temperature_unit)));
-        break;
-      case DHT20_ERROR_CHECKSUM:
-        logger.log(Logger::Level::Error, "Reading DHT20 failed: Checksum error");
-        break;
-      case DHT20_ERROR_CONNECT:
-        logger.log(Logger::Level::Error, "Reading DHT20 failed: Connect error");
-        break;
-      case DHT20_MISSING_BYTES:
-       logger.log(Logger::Level::Error, "Reading DHT20 failed: Missing bytes");
-        break;
-      case DHT20_ERROR_BYTES_ALL_ZERO:
-        logger.log(Logger::Level::Error, "Reading DHT20 failed: All bytes read zero");
-        break;
-      case DHT20_ERROR_READ_TIMEOUT:
-        logger.log(Logger::Level::Error, "Reading DHT20 failed: Read time out");
-        break;
-      case DHT20_ERROR_LASTREAD:
-        logger.log(Logger::Level::Error, "Reading DHT20 failed: Error read too fast");
-        break;
-      default:
-        logger.log(Logger::Level::Error, "Reading DHT20 failed: Unknown error");
-        break;
-    }
-}
-
-void read_pms() {
-  pms.wake();
-  pms.read();
-  if (pms)
-  { // successfull read
-    measurements.push_back(std::unique_ptr<Measurement>(new DecimalMeasurement(Measurement::Type::PM1, pms.pm01, pms_unit)));
-    measurements.push_back(std::unique_ptr<Measurement>(new DecimalMeasurement(Measurement::Type::PM25, pms.pm25, pms_unit)));
-    measurements.push_back(std::unique_ptr<Measurement>(new DecimalMeasurement(Measurement::Type::PM10, pms.pm10, pms_unit)));
-  }
-  else
-  { // something went wrong
-    switch (pms.status)
-    {
-    case pms.OK: // should never come here
-      break;     // included to compile without warnings
-    case pms.ERROR_TIMEOUT:
-      logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_TIMEOUT);
-      break;
-    case pms.ERROR_MSG_UNKNOWN:
-      logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_UNKNOWN);
-      break;
-    case pms.ERROR_MSG_HEADER:
-      logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_HEADER);
-      break;
-    case pms.ERROR_MSG_BODY:
-      logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_BODY);
-      break;
-    case pms.ERROR_MSG_START:
-      logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_START);
-      break;
-    case pms.ERROR_MSG_LENGTH:
-      logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_LENGTH);
-      break;
-    case pms.ERROR_MSG_CKSUM:
-      logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_CKSUM);
-      break;
-    case pms.ERROR_PMS_TYPE:
-      logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_PMS_TYPE);
-      break;
-    }
-  }
-  pms.sleep();
-}
-
 void show_on_display(const std::unique_ptr<Measurement>& measurement) {
-  show_on_display(Measurement::HumanReadableFormatter::format(measurement));
+  std::string message(friendly_name_type_translator.translate(measurement->get_details().get_type()));
+  message
+    .append(": ")
+    .append(measurement->value_to_string())
+    .append(" ")
+    .append(display_unit_translator.translate(measurement->get_details().get_unit()));
+  show_on_display(message);
   delay(display_each_measurement_for_in_millis);
-}
-
-bool send_discovery_messages() {
-  for (const auto& sensor_definition : home_assistant_device->sensor_definitions()) {
-    ReconnectingPubSubClient::Error publish_error = reconnecting_mqtt_client->publish(
-      home_assistant_device->get_discovery_topic_for(sensor_definition),
-      home_assistant_device->get_discovery_message_for_sensor(sensor_definition),
-      true);
-
-    if (publish_error != ReconnectingPubSubClient::Error::None) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 void loop() {
@@ -432,35 +317,25 @@ void loop() {
   if (!web_portal_requested) {
     if (mqtt_configured) {
       mqtt_client.loop();
+    }
 
-      if (is_setup) {
+    if (is_setup) {       
+      if (should_read_new_measurements()) {
+        measurements.clear();
 
-        if (!discovery_messages_sent) {
-          discovery_messages_sent = send_discovery_messages();
+        dht20.provide_measurements(measurements);
+        mhz19.provide_measurements(measurements);
+        pms.provide_measurements(measurements);
+
+        for (const auto& reporter : measurement_reporters) {
+          reporter->report(measurements);
         }
 
-        if (should_read_new_measurements()) {
-          measurements.clear();
-
-          read_temperature_and_humidity();
-          read_co2();
-          read_pms();
-
-          DynamicJsonDocument measurements_json(1024);
-          for (const auto& measurement : measurements) {
-            measurements_json[device_classes_of_measurement_types[(uint16_t)measurement->get_type()]] = measurement->value_as_string();
-
-            show_on_display(measurement);
-          }
-
-          report(measurements_json);
-
-          time(&data_last_read_timestamp);
-        }
-        else {
-          for (const auto& measurement : measurements) {
-            show_on_display(measurement);    
-          }
+        time(&data_last_read_timestamp);
+      }
+      else {
+        for (const auto& measurement : measurements) {
+          show_on_display(measurement);    
         }
       }
     }

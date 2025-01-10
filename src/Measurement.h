@@ -1,67 +1,48 @@
 #pragma once
 
 #include <string>
-#include <sstream>
-#include <iomanip>
+#include <format>
 
 #include "ArduinoJson.h"
 
-static const std::string names[6] = {"Temperature", "Humidity", "PM1", "PM2.5", "PM10", "CO2"};
+enum class MeasurementType { Temperature, Humidity, PM1, PM25, PM10, CO2 };
+enum class MeasurementUnit { DegreesCelcius, Percent, PPM, MicroGramPerCubicMeter };
 
-class Measurement 
-{
-    public:
-        enum class Type { Temperature, Humidity, PM1, PM25, PM10, CO2 };
-
+class MeasurementDetails {
     private:
-        const std::string unit;
-        const Measurement::Type type;     
-
-    protected:
-        Measurement(Measurement::Type type, const std::string& unit) 
+        const MeasurementType type;     
+        const MeasurementUnit unit;
+    
+    public:
+        MeasurementDetails(const MeasurementType type, const MeasurementUnit unit) 
             : type(type)
-            , unit(unit)
-        {
+            , unit(unit) {
         }
 
-    public:
-        class HumanReadableFormatter {
-
-            private:
-                
-
-            public:
-                HumanReadableFormatter() = delete;
-
-                static std::string format(const Measurement::Type& type) {
-                    return names[(uint16_t)type];
-                }
-
-                static std::string format(const std::unique_ptr<Measurement>& measurement) {
-                    std::string result(format(measurement->get_type()));
-                    return result.append(": ").append(measurement->value_as_string()).append(" ").append(measurement->get_unit()); 
-                }
-
-        };
-
-        virtual std::string value_as_string() const = 0;
-
-        Measurement::Type get_type() const {
+        MeasurementType get_type() const {
             return type;
         }
 
-        std::string get_unit() const {
+        MeasurementUnit get_unit() const {
             return unit;
         }
+};
 
-        std::string in_json_format() const {
-            std::string result("{");
-            result
-                .append("\"unit\": \"").append(unit).append("\",")
-                .append("\"value\": ").append(value_as_string())
-                .append("}");
-            return result;
+class Measurement {
+    private:
+        const MeasurementDetails details;
+
+    protected:
+        Measurement(const MeasurementDetails details) 
+            : details(details) {
         }
+
+    public:
+        MeasurementDetails get_details() const {
+            return details;
+        }
+
+        virtual std::string value_to_string() const = 0;
 };
 
 class DecimalMeasurement : public Measurement 
@@ -70,17 +51,18 @@ class DecimalMeasurement : public Measurement
         const double value;
 
     public:
-        DecimalMeasurement(Measurement::Type type, const double value, const std::string& unit)
-            : Measurement(type, unit)
+        DecimalMeasurement(const MeasurementDetails details, const double value)
+            : Measurement(details)
             , value(value) 
         {                
         }
 
-        std::string value_as_string() const override {
-            std::ostringstream result;
-            result.precision(4);
-            result << std::ceil(value * 100.0) / 100.0;
-            return result.str();
+        double get_value() const {
+            return value;
+        }
+
+        std::string value_to_string() const override {
+            return std::format("{:.2f}", value);
         }
 };
 
@@ -90,13 +72,17 @@ class RoundNumberMeasurement : public Measurement
         const uint32_t value;
 
     public:
-        RoundNumberMeasurement(Measurement::Type type, const uint32_t value, const std::string& unit) 
-            : Measurement(type, unit)
+        RoundNumberMeasurement(const MeasurementDetails details, const uint32_t value) 
+            : Measurement(details)
             , value(value)
         {            
         }
 
-        std::string value_as_string() const override {
+        uint32_t get_value() const {
+            return value;
+        }
+
+        std::string value_to_string() const override {
             return std::to_string(value);
         }
 };

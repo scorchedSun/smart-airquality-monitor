@@ -3,42 +3,41 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <unordered_map>
 
 #include "ArduinoJson.h"
 
-#include "Measurement.h"
+#include "Sensor.h"
 #include "ReconnectingPubSubClient.h"
-
-static const char default_discovery_prefix[] = "homeassistant";
-
-class SensorDefinition {
-
-private:
-    const std::string _name;
-    const std::string _abbreviated_name;
-    const std::string _device_class;
-    const std::string _unit_of_measurement;
-
-public:
-    SensorDefinition(const std::string& name,
-                                  const std::string& abbreviated_name,
-                                  const std::string& device_class,
-                                  const std::string& unit_of_measurement) 
-        : _name(name)
-        , _abbreviated_name(abbreviated_name)
-        , _device_class(device_class)
-        , _unit_of_measurement(unit_of_measurement) {
-    }
-
-    const std::string& name() const { return _name; }
-    const std::string& abbreviated_name() const { return _abbreviated_name; }
-    const std::string& device_class() const { return _device_class; }
-    const std::string& unit_of_measurement() const { return _unit_of_measurement; }
-};
+#include "Translator.h"
 
 class HomeAssistantDevice {
 
 private:    
+    const std::unordered_map<MeasurementType, std::string> device_classes = {
+            {MeasurementType::Temperature, "temperature"},
+            {MeasurementType::Humidity, "humidity"},
+            {MeasurementType::PM1, "pm1"},
+            {MeasurementType::PM25, "pm25"},
+            {MeasurementType::PM10, "pm10"},
+            {MeasurementType::CO2, "carbon_dioxide"}
+        };
+    const std::unordered_map<MeasurementType, std::string> abbreviated_names = {
+            {MeasurementType::Temperature, "temp"},
+            {MeasurementType::Humidity, "hum"},
+            {MeasurementType::PM1, "pm1"},
+            {MeasurementType::PM25, "pm25"},
+            {MeasurementType::PM10, "pm10"},
+            {MeasurementType::CO2, "co2"}
+        };
+    const std::unordered_map<MeasurementUnit, std::string> unit_map = {
+        {MeasurementUnit::DegreesCelcius, "°C"},
+        {MeasurementUnit::Percent, "%"},
+        {MeasurementUnit::PPM, "ppm"},
+        {MeasurementUnit::MicroGramPerCubicMeter, "µg/m³"}
+    };
+    const FriendlyNameTypeTranslator friendly_name_type_translator;
+
     const std::string discovery_prefix;
     const std::string device_prefix;
     const std::string mac_id;
@@ -47,8 +46,8 @@ private:
     const std::string topic_base;
     const std::string sensor_state_topic;
     DynamicJsonDocument device_json;
-    std::vector<std::unique_ptr<SensorDefinition>> _sensor_definitions;
 
+    std::unordered_map<MeasurementType, bool> discovery_message_sent;
 public:
 
     HomeAssistantDevice() = delete;
@@ -57,7 +56,7 @@ public:
                         const std::string mac_id,
                         const std::string device_name,
                         const std::string software_version,
-                        const std::string& discovery_prefix = default_discovery_prefix)
+                        const std::string& discovery_prefix = "homeassistant")
         : device_prefix(device_prefix)
         , mac_id(mac_id)
         , device_name(device_name)
@@ -73,29 +72,31 @@ public:
         device_json["sw"] = software_version;
     }
 
-    void register_sensor(std::unique_ptr<SensorDefinition>&& sensor_definition) {
-        _sensor_definitions.push_back(std::move(sensor_definition));
+    std::string get_unique_id_for(const MeasurementDetails& details) const {
+        return std::string(abbreviated_names.find(details.get_type())->second).append("_").append(mac_id);
     }
 
-    DynamicJsonDocument get_discovery_message_for_sensor(const std::unique_ptr<SensorDefinition>& sensor_definition) const {
-        const std::string& device_class = sensor_definition->device_class();
+    std::string get_device_class_for(const MeasurementDetails& details) const {
+        return device_classes.find(details.get_type())->second;
+    }
+
+    DynamicJsonDocument get_discovery_message_for(const MeasurementDetails& details) const {
+        const std::string& device_class = get_device_class_for(details);
 
         DynamicJsonDocument discovery_json(1024);
         discovery_json["dev"] = device_json;
-        discovery_json["name"] = sensor_definition->name();
-        discovery_json["uniq_id"] = std::string(sensor_definition->abbreviated_name()).append("_").append(mac_id);
+        discovery_json["name"] = friendly_name_type_translator.translate(details.get_type());
+        discovery_json["uniq_id"] = get_unique_id_for(details);
         discovery_json["dev_cla"] = device_class;
         discovery_json["val_tpl"] = std::string("{{ value_json.").append(device_class).append(" }}");
-        discovery_json["unit_of_meas"] = sensor_definition->unit_of_measurement();
+        discovery_json["unit_of_meas"] = unit_map.find(details.get_unit())->second;
         discovery_json["stat_t"] = sensor_state_topic;
 
         return discovery_json;
     }
 
-    const std::vector<std::unique_ptr<SensorDefinition>>& sensor_definitions() const { return _sensor_definitions; }
-
-    std::string get_discovery_topic_for(const std::unique_ptr<SensorDefinition>& sensor_definition) const {
-        return std::string(topic_base).append(device_id).append("/").append(sensor_definition->abbreviated_name()).append("/config");
+    std::string get_discovery_topic_for(const MeasurementDetails& details) const {
+        return std::string(topic_base).append(device_id).append("/").append(abbreviated_names.find(details.get_type())->second).append("/config");
     }
 
     std::string get_device_id() const {
@@ -104,5 +105,18 @@ public:
 
     std::string get_sensor_state_topic() const {
         return sensor_state_topic;
+    }
+
+    bool has_discovery_message_been_sent_for(const MeasurementDetails& details) const {
+        const auto& iterator = discovery_message_sent.find(details.get_type());
+
+        if (iterator != discovery_message_sent.cend()) {
+            return iterator->second;
+        }
+        return false;
+    }
+
+    void set_discovery_message_sent_for(const MeasurementDetails& details) {
+        discovery_message_sent[details.get_type()] = true;
     }
 };
