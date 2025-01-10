@@ -5,7 +5,7 @@
 #include "Sensor.h"
 #include "Logger.h"
 
-class PMWrapper : Sensor {
+class PMWrapper : public Sensor {
 
 private:
     const MeasurementDetails pm1_details = MeasurementDetails(MeasurementType::PM1, MeasurementUnit::MicroGramPerCubicMeter);
@@ -19,7 +19,7 @@ public:
         : sensor(type, rx_pin, tx_pin) {
     }
 
-    bool begin() {
+    bool begin() override {
         sensor.init();
         sensor.sleep();
         return true;

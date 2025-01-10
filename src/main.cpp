@@ -78,6 +78,7 @@ std::shared_ptr<ReconnectingPubSubClient> reconnecting_mqtt_client;
 ConfigAssist config(CA_DEF_CONF_FILE, VARIABLES_DEF_YAML);
 WebServer server(80);
 
+std::vector<std::unique_ptr<Sensor>> sensors;
 std::vector<std::unique_ptr<ValueReporter>> measurement_reporters;
 std::vector<char> wait_animation_chars { '-', '\\', '|', '/' };
 std::vector<std::unique_ptr<Measurement>> measurements;
@@ -93,9 +94,6 @@ std::uint16_t syslog_server_port;
 
 std::string log_level;
 
-DHT20Wrapper dht20;
-MHZ19Wrapper mhz19(MHZ19_RX_ATTACHED_TO, MHZ19_TX_ATTACHED_TO, MHZ19_BAUD_RATE);
-PMWrapper pms(PMS5003, PMS_TX_ATTACHED_TO, PMS_RX_ATTACHED_TO);
 DisplayUnitTranslator display_unit_translator;
 FriendlyNameTypeTranslator friendly_name_type_translator;
 
@@ -220,11 +218,13 @@ void setup_mqtt(const std::string& mqtt_device_id, std::shared_ptr<HomeAssistant
 }
 
 void initialize_sensors() {
-  pms.begin();  
+  sensors.push_back(std::make_unique<DHT20Wrapper>());
+  sensors.push_back(std::make_unique<MHZ19Wrapper>(MHZ19_RX_ATTACHED_TO, MHZ19_TX_ATTACHED_TO, MHZ19_BAUD_RATE));
+  sensors.push_back(std::make_unique<PMWrapper>(PMS5003, PMS_TX_ATTACHED_TO, PMS_RX_ATTACHED_TO));
 
-  dht20.begin();  
-
-  mhz19.begin();
+  for (const auto& sensor : sensors) {
+    sensor->begin();
+  }
 
   show_wait_animation("Initializing sensors", 120000);  // Wait 2 minutes
 }
@@ -323,9 +323,9 @@ void loop() {
       if (should_read_new_measurements()) {
         measurements.clear();
 
-        dht20.provide_measurements(measurements);
-        mhz19.provide_measurements(measurements);
-        pms.provide_measurements(measurements);
+        for (const auto& sensor : sensors) {
+          sensor->provide_measurements(measurements);
+        }
 
         for (const auto& reporter : measurement_reporters) {
           reporter->report(measurements);

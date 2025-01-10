@@ -5,7 +5,7 @@
 #include "Sensor.h"
 #include "Logger.h"
 
-class DHT20Wrapper : Sensor {
+class DHT20Wrapper : public Sensor {
 
 private:
     DHT20 sensor;
@@ -13,7 +13,7 @@ private:
     const MeasurementDetails humidity_sensor_details = MeasurementDetails(MeasurementType::Humidity, MeasurementUnit::Percent);
 
 public:
-    bool begin() {
+    bool begin() override {
         return sensor.begin();
     }
 
