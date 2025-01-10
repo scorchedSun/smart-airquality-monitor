@@ -10,7 +10,7 @@ public:
     virtual std::string translate(const T& to_translate) const = 0;
 };
 
-class DisplayUnitTranslator : Translator<MeasurementUnit> {
+class DisplayUnitTranslator : public Translator<MeasurementUnit> {
     const std::unordered_map<MeasurementUnit, std::string> unit_names = {
         {MeasurementUnit::DegreesCelcius, "C"},
         {MeasurementUnit::Percent, "%"},
@@ -24,7 +24,7 @@ public:
     }
 };
 
-class FriendlyNameTypeTranslator : Translator<MeasurementType> {
+class FriendlyNameTypeTranslator : public Translator<MeasurementType> {
     const std::unordered_map<MeasurementType, std::string> type_names = {
         {MeasurementType::Temperature, "Temperature"},
         {MeasurementType::Humidity, "Humidity"},

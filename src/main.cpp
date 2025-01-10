@@ -13,7 +13,6 @@
 #include "WebServer.h"
 #include "Arduino.h"
 #include "SoftwareSerial.h"
-#include "Adafruit_SSD1306.h"
 #include "ArduinoJson.h"
 #include "PubSubClient.h"
 #include "WiFi.h"
@@ -33,6 +32,7 @@
 #include "MHZ19Wrapper.h"
 #include "PMWrapper.h"
 #include "Translator.h"
+#include "Display.h"
 
 // OLED -> GND | VCC | SCK | SDA | RES | DC | CS
 #define OLED_MOSI   23  // SDA
@@ -64,7 +64,13 @@ static const std::string device_prefix("smaq_");
 WiFiClient wifi_client;
 PubSubClient mqtt_client(wifi_client);
 
-Adafruit_SSD1306 display(128, 64, OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
+Display display(128,
+                64,
+                OLED_MOSI,
+                OLED_CLK,
+                OLED_DC,
+                OLED_RESET,
+                OLED_CS);
 
 Fan fan(FAN_PWM_PIN, FAN_FREQUENCY_HZ);
 
@@ -80,7 +86,6 @@ WebServer server(80);
 
 std::vector<std::unique_ptr<Sensor>> sensors;
 std::vector<std::unique_ptr<ValueReporter>> measurement_reporters;
-std::vector<char> wait_animation_chars { '-', '\\', '|', '/' };
 std::vector<std::unique_ptr<Measurement>> measurements;
 
 IPAddress ip_address;
@@ -94,9 +99,6 @@ std::uint16_t syslog_server_port;
 
 std::string log_level;
 
-DisplayUnitTranslator display_unit_translator;
-FriendlyNameTypeTranslator friendly_name_type_translator;
-
 bool should_save_config(false);
 bool is_setup(false);
 bool mqtt_configured(false);
@@ -105,46 +107,6 @@ bool web_portal_requested(false);
 bool display_enabled(true);
 bool display_setup(false);
 bool syslog_server_enabled(false);
-
-void add_details_on_display() {
-  if (!display_enabled || !display_setup) return;
-
-  if (!ip_address.toString().isEmpty()) {
-    display.setCursor(0,0);
-    display.print("IP: ");
-    display.print(ip_address);
-  }
-}
-
-void show_on_display(const std::string& value) {
-  if (!display_enabled || !display_setup) return;
-
-  display.clearDisplay();
-  add_details_on_display();
-  display.setCursor(5,28);
-  display.println(value.c_str());
-  display.display();
-}
-
-void show_wait_animation(const std::string title, const uint32_t time_millis) {
-  uint32_t start_time = millis();
-  uint8_t animation_index = 0;
-  uint8_t max_animation_index = (uint8_t)wait_animation_chars.size();
-
-  while (millis() - start_time <= time_millis) {
-    if (display_enabled && display_setup) {
-      display.clearDisplay();
-      add_details_on_display();
-      display.setCursor(0,16);
-      display.println(title.c_str());
-      display.setCursor(60, 36);
-      display.print(wait_animation_chars.at(animation_index));
-      display.display();
-      animation_index = ++animation_index % max_animation_index;
-    }
-    delay(100);
-  }
-}
 
 void register_handlers() {
   server.on("/", []() {
@@ -157,34 +119,8 @@ void register_handlers() {
   });
 }
 
-void setup_display() {
-  if (display_setup) return;
-
-  if (!display.begin(SSD1306_SWITCHCAPVCC))
-  {
-    LOG_E("Display could not be set up.");
-    for (;;);
-  }
-
-  display_setup = true;
-
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.clearDisplay();
-  display.display();
-  delay(100);
-}
-
-void turn_display_off() {
-  display.ssd1306_command(SSD1306_DISPLAYOFF);
-}
-
-void turn_display_on() {
-  display.ssd1306_command(SSD1306_DISPLAYON);
-}
-
 void read_device_configuration() {
-  display_enabled = config.exists("enable_display") ? config["enable_display"].toInt() : true;
+  display.set_enabled(config.exists("enable_display") ? config["enable_display"].toInt() : true);
   report_interval_in_seconds = config["report_interval"].toInt() * 60;
   display_each_measurement_for_in_millis = config["display_interval"].toInt() * 1000;
 }
@@ -226,7 +162,7 @@ void initialize_sensors() {
     sensor->begin();
   }
 
-  show_wait_animation("Initializing sensors", 120000);  // Wait 2 minutes
+  display.wait_with_animation("Initializing sensors", 120000);  // Wait 2 minutes
 }
 
 void setup() {
@@ -251,8 +187,8 @@ void setup() {
     ip_address.fromString(WiFi.softAPIP().toString().c_str());
     std::string accesspoint_ssid(config.getHostName().c_str());
     std::string message("Connecting to WiFi failed. Configure via AP '" + accesspoint_ssid + "'");
-    setup_display();
-    show_on_display(message);
+    display.setup();
+    display.show(message);
     return;
   }  
 
@@ -262,13 +198,9 @@ void setup() {
   read_device_configuration();
   read_log_server_configuration();
 
-  setup_display();
-
-  if (display_enabled && display_setup) {
-    show_on_display("Booting ...");
-  } else {
-    turn_display_off();
-  }
+  display.setup();
+  display.set_ip_address(ip_address.toString().c_str());
+  display.show("Booting ...");
 
   std::string friendly_name(config["friendly_name"].c_str());
 
@@ -278,7 +210,7 @@ void setup() {
 
   if (!Logger::try_get_level_by_name(log_level, parsed_log_level)) {    
     std::string message("Setup failed. Invalid configuration. Value '" + log_level + "' is not a supported log level.");
-    show_on_display(message);
+    display.show(message);
     return;
   }
 
@@ -298,17 +230,6 @@ bool should_read_new_measurements() {
   time_t now;
   time(&now);
   return data_last_read_timestamp == 0 || now - data_last_read_timestamp >= report_interval_in_seconds;
-}
-
-void show_on_display(const std::unique_ptr<Measurement>& measurement) {
-  std::string message(friendly_name_type_translator.translate(measurement->get_details().get_type()));
-  message
-    .append(": ")
-    .append(measurement->value_to_string())
-    .append(" ")
-    .append(display_unit_translator.translate(measurement->get_details().get_unit()));
-  show_on_display(message);
-  delay(display_each_measurement_for_in_millis);
 }
 
 void loop() {
@@ -335,7 +256,8 @@ void loop() {
       }
       else {
         for (const auto& measurement : measurements) {
-          show_on_display(measurement);    
+          display.show(measurement);    
+          delay(display_each_measurement_for_in_millis);
         }
       }
     }
