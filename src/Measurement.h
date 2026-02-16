@@ -37,12 +37,23 @@ class Measurement {
             : details(details) {
         }
 
+    private:
+        mutable std::string cached_value;
+
+    protected:
+        virtual std::string format_value() const = 0;
+
     public:
         MeasurementDetails get_details() const {
             return details;
         }
 
-        virtual std::string value_to_string() const = 0;
+        const std::string& value_to_string() const {
+            if (cached_value.empty()) {
+                cached_value = format_value();
+            }
+            return cached_value;
+        }
 };
 
 class DecimalMeasurement : public Measurement 
@@ -61,7 +72,7 @@ class DecimalMeasurement : public Measurement
             return value;
         }
 
-        std::string value_to_string() const override {
+        std::string format_value() const override {
             return std::format("{:.2f}", value);
         }
 };
@@ -82,7 +93,7 @@ class RoundNumberMeasurement : public Measurement
             return value;
         }
 
-        std::string value_to_string() const override {
+        std::string format_value() const override {
             return std::to_string(value);
         }
 };

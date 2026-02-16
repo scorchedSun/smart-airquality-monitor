@@ -4,6 +4,7 @@
 
 #include "Sensor.h"
 #include "Logger.h"
+#include <mutex>
 
 class DHT20Wrapper : public Sensor {
 
@@ -11,14 +12,21 @@ private:
     DHT20 sensor;
     const MeasurementDetails temperature_sensor_details = MeasurementDetails(MeasurementType::Temperature, MeasurementUnit::DegreesCelcius);
     const MeasurementDetails humidity_sensor_details = MeasurementDetails(MeasurementType::Humidity, MeasurementUnit::Percent);
+    std::mutex& i2c_mutex;
 
 public:
+    DHT20Wrapper(std::mutex& i2c_mutex) : i2c_mutex(i2c_mutex) {}
     bool begin() override {
+        std::lock_guard<std::mutex> lock(i2c_mutex);
         return sensor.begin();
     }
 
     bool provide_measurements(std::vector<std::unique_ptr<Measurement>>& measurements) override {
-        int status = sensor.read();
+        int status;
+        {
+            std::lock_guard<std::mutex> lock(i2c_mutex);
+            status = sensor.read();
+        }
 
         switch (status) {
             case DHT20_OK:

@@ -2,51 +2,51 @@
 
 #include "ArduinoJson.h"
 #include "WiFi.h"
+#include <map>
+#include <memory>
+#include <atomic>
 
 #include "Logger.h"
 #include "ValueReporter.h"
-#include "ReconnectingPubSubClient.h"
-#include "HomeAssistantDevice.h"
+#include "HASensor.h"
+#include "HomeAssistantManager.h"
 
 class HomeAssistantSensorReporter : public ValueReporter {
 
 private:
-    const std::shared_ptr<ReconnectingPubSubClient> mqtt_client;
-    const std::shared_ptr<HomeAssistantDevice> device;
+    std::shared_ptr<ha::Manager> ha_manager;
+    std::map<MeasurementType, std::shared_ptr<ha::Sensor>> sensors;
+    std::atomic<bool> needs_report{false};
 
 public:
-    HomeAssistantSensorReporter(
-        const std::shared_ptr<HomeAssistantDevice> device,
-        const std::shared_ptr<ReconnectingPubSubClient> mqtt_client)
-            : mqtt_client(mqtt_client)
-            , device(device) {
-        }
+    HomeAssistantSensorReporter(std::shared_ptr<ha::Manager> manager)
+            : ha_manager(manager) {
+    }
+    
+    void add_sensor(MeasurementType type, std::shared_ptr<ha::Sensor> sensor) {
+        sensors[type] = sensor;
+    }
 
     void report(const std::vector<std::unique_ptr<Measurement>>& measurements) override {
-        DynamicJsonDocument measurements_json(1024);
-
+        bool updated = false;
         for (const auto& measurement : measurements) {
-            const MeasurementDetails& details = measurement->get_details();
-            if (!device->has_discovery_message_been_sent_for(details)) {
-                ReconnectingPubSubClient::Error error = mqtt_client->publish(device->get_discovery_topic_for(details), device->get_discovery_message_for(details), true);
-                
-                if (error == ReconnectingPubSubClient::Error::None) {
-                    device->set_discovery_message_sent_for(details);
-                }
-            }
+            MeasurementType type = measurement->get_details().get_type();
+            
+            auto it = sensors.find(type);
+            if (it == sensors.end()) continue;
 
-            measurements_json[device->get_device_class_for(measurement->get_details())] = measurement->value_to_string();  
+            const auto& sensor = it->second;
+            sensor->update_state(measurement->value_to_string());
+            updated = true;
         }
 
-        if (WiFi.isConnected()) {
-            ReconnectingPubSubClient::Error publish_error = mqtt_client->publish(device->get_sensor_state_topic(), measurements_json);
-
-            if (publish_error != ReconnectingPubSubClient::Error::None) {
-                logger.log(Logger::Level::Warning, "Publishing sensor data to Home Assistant failed due to an error (Error code: {}).", (uint32_t)publish_error);
-            }
-        } else {
-            logger.log(Logger::Level::Warning, "Publishing sensor data to Home Assistant failed: WiFi is not connected.");
+        if (updated) {
+            needs_report.store(true);
         }
+    }
+
+    bool check_and_clear_report_flag() {
+        return needs_report.exchange(false);
     }
 
 };

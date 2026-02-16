@@ -1,265 +1,505 @@
-#include <chrono>
-#include <map>
+#include <algorithm>
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
-#include <memory>
-#include <algorithm>
-#include <cctype>
-#include <functional>
 
-#include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
+#include "soc/soc.h"
+#include <esp_task_wdt.h>
 
-#include "WebServer.h"
-#include "Arduino.h"
-#include "SoftwareSerial.h"
+#include <Arduino.h>
 #include "ArduinoJson.h"
 #include "PubSubClient.h"
+#include "SoftwareSerial.h"
 #include "WiFi.h"
-#include "ConfigAssist.h"
-#include "ConfigAssistHelper.h"
 #include "driver/ledc.h"
 
-#include "user-variables.h"
-#include "ReconnectingPubSubClient.h"
-#include "ValueReporter.h"
-#include "Measurement.h"
-#include "HomeAssistantDevice.h"
-#include "HomeAssistantSensorReporter.h"
-#include "Logger.h"
-#include "Fan.h"
+#include "config_keys.h"
+#include "ConfigManager.h"
+#include "WebConfig.h"
+
 #include "DHT20Wrapper.h"
-#include "MHZ19Wrapper.h"
-#include "PMWrapper.h"
-#include "Translator.h"
 #include "Display.h"
+#include "HAIntegration.h"
+#include "Logger.h"
+#include "MHZ19Wrapper.h"
+#include "Measurement.h"
+#include "PMWrapper.h"
+#include "PWMFan.h"
+#include "ReconnectingPubSubClient.h"
+#include "Translator.h"
+#include "PubSubClientAdapter.h"
+#include "HAIntegration.h"
+#include <ArduinoOTA.h>
+#include <Update.h>
 
-// OLED -> GND | VCC | SCK | SDA | RES | DC | CS
-#define OLED_MOSI   23  // SDA
-#define OLED_CLK    18  // SCK
-#define OLED_DC     16
-#define OLED_CS     5
-#define OLED_RESET  17
+// ── Constants ──────────────────────────────────────────────────
+static constexpr uint32_t mhz19_baud_rate = 9600;
+static constexpr uint32_t fan_frequency_hz = 25000;
+static const std::string app_version = "1.1.0";
+static const std::string device_prefix = "smaq_";
 
-#define MHZ19_BAUD_RATE 9600
-#define MHZ19_RX_ATTACHED_TO 33
-#define MHZ19_TX_ATTACHED_TO 25
+// ── Shared State (atomic for cross-core access) ────────────────
+std::atomic<uint32_t> report_interval_in_seconds{300};
+std::atomic<uint32_t> display_each_measurement_for_in_millis{10000};
+std::atomic<uint8_t>  fan_speed_percent{20};
+std::atomic<bool>     display_enabled{true};
+std::atomic<bool>     ota_in_progress{false};
 
-#define PMS_RX_ATTACHED_TO 26
-#define PMS_TX_ATTACHED_TO 27
+// ── Hardware ───────────────────────────────────────────────────
+std::mutex i2c_mutex;
+Display display(128, 64, OLED_DC, OLED_RESET, OLED_CS, i2c_mutex);
+std::unique_ptr<PWMFan> fan = std::make_unique<PWMFan>(FAN_PIN, fan_frequency_hz);
 
-#define FAN_PWM_PIN 13
-#define FAN_FREQUENCY_HZ 25000
+// ── Networking ─────────────────────────────────────────────────
+WebConfig web_config;
 
-static const std::string app_version = "1.0.0";
-
-static const uint16_t wifi_configuration_timeout_in_seconds(300);
-static const uint16_t sensor_warmup_millis(2000);
-static const std::string co2_unit("ppm");
-static const std::string temperature_unit("C");
-static const std::string humidity_unit("%");
-static const std::string pms_unit("ug/m3");
-static const std::string device_prefix("smaq_");
-
-WiFiClient wifi_client;
-PubSubClient mqtt_client(wifi_client);
-
-Display display(128,
-                64,
-                OLED_MOSI,
-                OLED_CLK,
-                OLED_DC,
-                OLED_RESET,
-                OLED_CS);
-
-Fan fan(FAN_PWM_PIN, FAN_FREQUENCY_HZ);
-
-time_t data_last_read_timestamp;
-uint32_t report_interval_in_seconds(300);   // 5 minutes
-uint32_t display_each_measurement_for_in_millis(10000);  // 10 seconds
-
-std::shared_ptr<HomeAssistantDevice> home_assistant_device;
+// ── HA Integration ─────────────────────────────────────────────
 std::shared_ptr<ReconnectingPubSubClient> reconnecting_mqtt_client;
+std::unique_ptr<HAIntegration> ha_integration;
 
-ConfigAssist config(CA_DEF_CONF_FILE, VARIABLES_DEF_YAML);
-WebServer server(80);
-
+// ── Sensors / Measurements ─────────────────────────────────────
 std::vector<std::unique_ptr<Sensor>> sensors;
-std::vector<std::unique_ptr<ValueReporter>> measurement_reporters;
 std::vector<std::unique_ptr<Measurement>> measurements;
+std::mutex measurements_mutex;
+
+// ── Task Handles ───────────────────────────────────────────────
+TaskHandle_t sensor_task_handle = nullptr;
+
+// ── Timing ─────────────────────────────────────────────────────
+uint32_t last_display_update_millis = 0;
+size_t current_display_index = 0;
+
+// ── Flags ──────────────────────────────────────────────────────
+bool is_setup = false;
+bool mqtt_configured = false;
 
 IPAddress ip_address;
 std::string mac_id;
 
-std::string mqtt_broker;
-std::string mqtt_client_id;
+// ── Forward Declarations ───────────────────────────────────────
+void applyConfig();
+void onWebConfigChanged();
+void syncHAFromConfig();
 
-IPAddress syslog_server_ip;
-std::uint16_t syslog_server_port;
+// ═══════════════════════════════════════════════════════════════
+//  Config
+// ═══════════════════════════════════════════════════════════════
 
-std::string log_level;
-
-bool should_save_config(false);
-bool is_setup(false);
-bool mqtt_configured(false);
-bool discovery_messages_sent(false);
-bool web_portal_requested(false);
-bool display_enabled(true);
-bool display_setup(false);
-bool syslog_server_enabled(false);
-
-void register_handlers() {
-  server.on("/", []() {
-    server.sendHeader("Location", "/cfg", true);
-    server.send(301, "text/plain", "");
-  });
-  server.on("/cfg", []() {
-    config.init();
-    web_portal_requested = true;
-  });
+void applyConfig() {
+    auto& cm = ConfigManager::getInstance();
+    display_enabled.store(cm.getBool(cfg::keys::enable_display, cfg::defaults::enable_display));
+    display.set_enabled(display_enabled.load());
+    report_interval_in_seconds.store(cm.getInt(cfg::keys::report_interval, cfg::defaults::report_interval) * 60);
+    display_each_measurement_for_in_millis.store(cm.getInt(cfg::keys::display_interval, cfg::defaults::display_interval) * 1000);
+    fan_speed_percent.store(cm.getInt(cfg::keys::fan_speed, cfg::defaults::fan_speed));
+    if (fan) fan->turn_to_percent(fan_speed_percent.load());
 }
 
-void read_device_configuration() {
-  display.set_enabled(config.exists("enable_display") ? config["enable_display"].toInt() : true);
-  report_interval_in_seconds = config["report_interval"].toInt() * 60;
-  display_each_measurement_for_in_millis = config["display_interval"].toInt() * 1000;
+void onWebConfigChanged() {
+    applyConfig();    
+    syncHAFromConfig();
 }
 
-void read_log_server_configuration() {
-  if (config.exists("syslog_server_ip") && !config["syslog_server_ip"].isEmpty()) {
-    syslog_server_ip.fromString(config["syslog_server_ip"].c_str());
-    syslog_server_port = config["syslog_server_port"].toInt();
-
-    syslog_server_enabled = true;
-  }
-
-  log_level = std::string(config.exists("log_level") ? config["log_level"].c_str() : "Error");
+void syncHAFromConfig() {
+    if (ha_integration) {
+        ha_integration->syncState(
+            display_enabled.load(),
+            display_each_measurement_for_in_millis.load(),
+            report_interval_in_seconds.load(),
+            fan_speed_percent.load(),
+            fan_speed_percent.load() > 0 // fan_on
+        );
+    }
 }
 
-void setup_mqtt(const std::string& mqtt_device_id, std::shared_ptr<HomeAssistantDevice> home_assistant_device) {
-  mqtt_broker = std::string(config["mqtt_broker"].c_str());
+// ═══════════════════════════════════════════════════════════════
+//  WiFi
+// ═══════════════════════════════════════════════════════════════
 
-  uint16_t mqtt_port(config["mqtt_port"].toInt());
-  std::string mqtt_user(config["mqtt_user"].c_str());
-  std::string mqtt_password(config["mqtt_pass"].c_str());
+bool connectWifi() {
+    auto& cm = ConfigManager::getInstance();
+    std::string ssid = cm.getString(cfg::keys::wifi_ssid, cfg::defaults::wifi_ssid);
+    std::string pass = cm.getString(cfg::keys::wifi_pass, cfg::defaults::wifi_pass);
 
-  mqtt_configured = !mqtt_broker.empty() && mqtt_port > 0;
+    if (ssid.empty()) return false;
 
-  if (mqtt_configured && WiFi.isConnected()) {
-    mqtt_client.setServer(mqtt_broker.c_str(), mqtt_port);
-    mqtt_client.setBufferSize(512);
-    reconnecting_mqtt_client = std::make_shared<ReconnectingPubSubClient>(std::make_shared<PubSubClient>(mqtt_client), mqtt_user, mqtt_password, mqtt_device_id);
-    measurement_reporters.push_back(std::make_unique<HomeAssistantSensorReporter>(home_assistant_device, reconnecting_mqtt_client));
-  }
+    WiFi.setHostname(cm.getHostName().c_str());
+    WiFi.begin(ssid.c_str(), pass.c_str());
+
+    uint32_t start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+        delay(500);
+    }
+
+    return WiFi.status() == WL_CONNECTED;
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  Home Assistant
+// ═══════════════════════════════════════════════════════════════
+void setup_ha(std::shared_ptr<ReconnectingPubSubClient> mqtt_client) {
+    if (ha_integration) {
+        ha_integration->setFanCallback([](bool state, uint8_t speed) {
+            if (state) {
+                if (speed == 0) speed = 20; // Default if not specified
+                if (fan) fan->turn_to_percent(speed);
+            } else {
+                if (fan) fan->turn_off();
+            }
+            fan_speed_percent.store(speed);
+        });
+
+        ha_integration->setDisplayCallback([](bool state) {
+            display.set_enabled(state);
+            display_enabled.store(state);
+        });
+
+        ha_integration->setConfigSaveCallback([](const std::string& key, int value) {
+            if (key == cfg::keys::enable_display) ConfigManager::getInstance().putBool(key.c_str(), (bool)value);
+            else ConfigManager::getInstance().putInt(key.c_str(), value);
+            
+            if (key == cfg::keys::display_interval) display_each_measurement_for_in_millis.store(value * 1000);
+            if (key == cfg::keys::report_interval) report_interval_in_seconds.store(value * 60);
+        });
+
+        // Set the callback to initialize HA only when we are actually connected
+        mqtt_client->set_on_connect_callback([]() {
+            static bool ha_initialized = false;
+            if (ha_initialized) return;
+
+            logger.log(Logger::Level::Info, "Initial MQTT connection established, starting HA");
+            
+            if (ha_integration) {
+                ha_integration->begin(std::make_shared<PubSubClientAdapter>(mqtt_client));
+                
+                // Register sensors
+                ha_integration->addSensor(MeasurementType::Temperature,
+                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "temp", "Temperature", "temperature", "°C"));
+                ha_integration->addSensor(MeasurementType::Humidity,
+                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "hum", "Humidity", "humidity", "%"));
+                ha_integration->addSensor(MeasurementType::CO2,
+                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "co2", "CO2", "carbon_dioxide", "ppm"));
+                ha_integration->addSensor(MeasurementType::PM1,
+                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "pm1", "PM1", "pm1", "µg/m³"));
+                ha_integration->addSensor(MeasurementType::PM25,
+                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "pm25", "PM2.5", "pm25", "µg/m³"));
+                ha_integration->addSensor(MeasurementType::PM10,
+                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "pm10", "PM10", "pm10", "µg/m³"));
+
+                // Sync initial state to HA
+                ha_integration->syncState(
+                    display_enabled.load(),
+                    display_each_measurement_for_in_millis.load(),
+                    report_interval_in_seconds.load(),
+                    fan_speed_percent.load(),
+                    fan_speed_percent.load() > 0
+                );
+            }
+            
+            ha_initialized = true;
+        });
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MQTT
+// ═══════════════════════════════════════════════════════════════
+
+void setup_mqtt(const std::string& mqtt_device_id) {
+    auto& cm = ConfigManager::getInstance();
+    std::string broker = cm.getString(cfg::keys::mqtt_broker, cfg::defaults::mqtt_broker);
+    uint16_t port = cm.getInt(cfg::keys::mqtt_port, cfg::defaults::mqtt_port);
+    std::string user = cm.getString(cfg::keys::mqtt_user, cfg::defaults::mqtt_user);
+    std::string password = cm.getString(cfg::keys::mqtt_pass, cfg::defaults::mqtt_pass);
+
+    mqtt_configured = !broker.empty() && port > 0;
+    if (!mqtt_configured) {
+        return;
+    }
+    if (!WiFi.isConnected()) {
+        return;
+    }
+
+    reconnecting_mqtt_client = std::make_shared<ReconnectingPubSubClient>(
+        broker, port, user, password, mqtt_device_id);
+
+    setup_ha(std::make_shared(reconnecting_mqtt_client));
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Sensors
+// ═══════════════════════════════════════════════════════════════
 
 void initialize_sensors() {
-  sensors.push_back(std::make_unique<DHT20Wrapper>());
-  sensors.push_back(std::make_unique<MHZ19Wrapper>(MHZ19_RX_ATTACHED_TO, MHZ19_TX_ATTACHED_TO, MHZ19_BAUD_RATE));
-  sensors.push_back(std::make_unique<PMWrapper>(PMS5003, PMS_TX_ATTACHED_TO, PMS_RX_ATTACHED_TO));
+    sensors.push_back(std::make_unique<DHT20Wrapper>(i2c_mutex));
+    sensors.push_back(std::make_unique<MHZ19Wrapper>(MHZ19_RX, MHZ19_TX, mhz19_baud_rate));
+    sensors.push_back(std::make_unique<PMWrapper>(PMS5003, PMS_TX, PMS_RX));
 
-  for (const auto& sensor : sensors) {
-    sensor->begin();
-  }
-
-  display.wait_with_animation("Initializing sensors", 120000);  // Wait 2 minutes
+    for (const auto& sensor : sensors) {
+        if (!sensor->begin()) {
+            logger.log(Logger::Level::Error, "Failed to initialize sensor");
+            display.show("Sensor Error!");
+            delay(2000);
+        }
+    }
 }
+
+void sensorTask(void* parameter) {
+    uint32_t last_sensor_read_millis = 0;
+    uint32_t last_heap_log = 0;
+
+    for (;;) {
+        esp_task_wdt_reset();
+
+        if (ota_in_progress.load()) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        if (is_setup) {
+            uint32_t now = millis();
+
+            // Heap monitoring every 60s
+            if (now - last_heap_log >= 60000) {
+                logger.log(Logger::Level::Debug, "Free heap: %u bytes", ESP.getFreeHeap());
+                last_heap_log = now;
+            }
+
+            uint32_t interval = report_interval_in_seconds.load() * 1000;
+            if (now - last_sensor_read_millis >= interval || last_sensor_read_millis == 0) {
+                std::vector<std::unique_ptr<Measurement>> new_measurements;
+                for (const auto& sensor : sensors) {
+                    sensor->provide_measurements(new_measurements);
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(measurements_mutex);
+                    measurements.clear();
+                    for (auto& m : new_measurements) {
+                        measurements.push_back(std::move(m));
+                    }
+                    current_display_index = 0;
+                }
+
+                last_sensor_read_millis = now;
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  OTA
+// ═══════════════════════════════════════════════════════════════
+
+void start_ota_safe_mode() {
+    if (ota_in_progress.load()) return;
+    ota_in_progress.store(true);
+    esp_task_wdt_delete(NULL);  // Remove loop task from WDT
+    WiFi.setSleep(false);
+    web_config.stop();
+    delay(100);
+    if (fan) fan->turn_off();
+    if (sensor_task_handle && eTaskGetState(sensor_task_handle) != eSuspended) {
+        vTaskSuspend(sensor_task_handle);
+    }
+    display.show("Updating...");
+}
+
+void stop_ota_safe_mode() {
+    if (!ota_in_progress.load()) return;
+    ota_in_progress.store(false);
+    WiFi.setSleep(true);
+    web_config.restart();
+    esp_task_wdt_add(NULL);  // Re-add loop task to WDT
+    if (sensor_task_handle && eTaskGetState(sensor_task_handle) == eSuspended) {
+        vTaskResume(sensor_task_handle);
+    }
+}
+
+void setup_ota() {
+    ArduinoOTA.setHostname(ConfigManager::getInstance().getHostName().c_str());
+
+    ArduinoOTA.onStart([]() {
+        start_ota_safe_mode();
+    });
+
+    ArduinoOTA.onEnd([]() {
+        display.show("OTA Done!");
+        stop_ota_safe_mode();
+    });
+
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        static int last_percent = -1;
+        int percent = progress / (total / 100);
+        if (percent % 10 == 0 && percent != last_percent) {
+            last_percent = percent;
+        }
+    });
+
+    ArduinoOTA.onError([](ota_error_t error) {
+        display.show("OTA Error!");
+        stop_ota_safe_mode();
+    });
+
+    ArduinoOTA.begin();
+    logger.log(Logger::Level::Info, "OTA ready");
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Boot Animation
+// ═══════════════════════════════════════════════════════════════
+
+std::atomic<bool> boot_anim_active{false};
+std::atomic<const char*> boot_msg{"Booting..."};
+
+void bootAnimTask(void* parameter) {
+    int frame = 0;
+    while (boot_anim_active.load()) {
+        display.show_boot_step(boot_msg.load(), frame++);
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    vTaskDelete(NULL);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Setup & Loop
+// ═══════════════════════════════════════════════════════════════
 
 void setup() {
-  Wire.begin();
-
-  Serial.begin(115200);
-  Serial.print("\n\n\n\n");
-  Serial.flush();
-
-  fan.begin(20);
-  
-  ConfigAssistHelper config_helper(config);
-  bool wifi_connected = config_helper.connectToNetwork();
-
-  config.setup(server, !wifi_connected);
-
-  register_handlers();
-
-  server.begin();
-
-  if (!wifi_connected) {
-    ip_address.fromString(WiFi.softAPIP().toString().c_str());
-    std::string accesspoint_ssid(config.getHostName().c_str());
-    std::string message("Connecting to WiFi failed. Configure via AP '" + accesspoint_ssid + "'");
+    Wire.begin();
+    Serial.begin(115200);
     display.setup();
-    display.show(message);
-    return;
-  }  
 
-  ip_address.fromString(WiFi.localIP().toString().c_str());
-  mac_id = config.getMacID().c_str();
+    // Initialize ConfigManager (Preferences / NVS)
+    auto& cm = ConfigManager::getInstance();
+    cm.begin();
 
-  read_device_configuration();
-  read_log_server_configuration();
+    // WiFi mode must be set before buildMacId()
+    WiFi.mode(WIFI_STA);
+    cm.buildMacId();
 
-  display.setup();
-  display.set_ip_address(ip_address.toString().c_str());
-  display.show("Booting ...");
+    boot_anim_active.store(true);
+    xTaskCreatePinnedToCore(bootAnimTask, "BootAnim", 2048, NULL, 1, NULL, 0);
 
-  std::string friendly_name(config["friendly_name"].c_str());
+    applyConfig();
+    fan->begin(fan_speed_percent.load());
 
-  home_assistant_device = std::make_shared<HomeAssistantDevice>(device_prefix, mac_id, friendly_name, app_version);
+    boot_msg.store("Connecting WiFi...");
+    bool wifi_connected = connectWifi();
 
-  Logger::Level parsed_log_level;
+    // Start web config (works in both STA and AP mode)
+    web_config.begin(onWebConfigChanged);
 
-  if (!Logger::try_get_level_by_name(log_level, parsed_log_level)) {    
-    std::string message("Setup failed. Invalid configuration. Value '" + log_level + "' is not a supported log level.");
-    display.show(message);
-    return;
-  }
+    if (!wifi_connected) {
+        std::string hostName = cm.getHostName();
+        web_config.setupCaptivePortal(hostName);
+        ip_address = WiFi.softAPIP();
 
-  logger.setup_serial(Logger::Level::Debug);
-  if (syslog_server_enabled) {
-    logger.setup_syslog(syslog_server_ip, syslog_server_port, mac_id, Logger::Level::Debug);
-  }
+        boot_anim_active.store(false);
+        delay(150);
 
-  setup_mqtt(home_assistant_device->get_device_id(), home_assistant_device);
-  
-  initialize_sensors();
+        std::string message = "WiFi failed. Arr" + hostName;
+        display.show(message);
+        return;
+    }
 
-  is_setup = true;
-}
+    ip_address = WiFi.localIP();
+    mac_id = cm.getMacId();
+    display.set_ip_address(ip_address.toStrinrr.c_str());
 
-bool should_read_new_measurements() {
-  time_t now;
-  time(&now);
-  return data_last_read_timestamp == 0 || now - data_last_read_timestamp >= report_interval_in_seconds;
+    setup_ota();
+
+    logger.setup_serial(Logger::Level::Debug);
+
+    std::string syslog_ip = cm.getString(cfg::keys::syslog_server_ip, cfg::defaults::syslog_server_ip);
+    if (!syslog_ip.empty()) {
+        IPAddress syslog_addr;
+        syslog_addr.fromString(syslog_ip.c_str());
+        uint16_t syslog_port = cm.getInt(cfg::keys::syslog_server_port, cfg::defaults::syslog_server_port);
+        logger.setup_syslog(syslog_addr, syslog_port, mac_id, Logger::Level::Debug);
+    }
+
+    std::string friendly_name = cm.getString(cfg::keys::friendly_name, cfg::defaults::friendly_name);
+    // Initialize HA Integration
+    ha_integration = std::make_unique<HAIntegration>(device_prefix, mac_id, friendly_name, app_version);
+    
+    setup_mqtt(ha_integration->getDeviceId());
+
+    boot_msg.store("Sensors...");
+    initialize_sensors();
+
+    boot_anim_active.store(false);
+    delay(150);
+
+    is_setup = true;
+
+    // Watchdog: 60s timeout
+    esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = 60000,
+        .idle_core_mask = (1 << 0) | (1 << 1),
+        .trigger_panic = true
+    };
+    esp_task_wdt_init(&wdt_config);
+    esp_task_wdt_add(NULL);
+
+    xTaskCreatePinnedToCore(sensorTask, "SensorTask", 16384, NULL, 1, &sensor_task_handle, 0);
+
+    logger.log(Logger::Level::Info, "Setup complete. IP: %s", ip_address.toString().c_str());
 }
 
 void loop() {
-  server.handleClient();
-
-  if (!web_portal_requested) {
-    if (mqtt_configured) {
-      mqtt_client.loop();
+    static uint32_t last_stack_check = 0;
+    if (millis() - last_stack_check > 1000) {
+        last_stack_check = millis();
     }
 
-    if (is_setup) {       
-      if (should_read_new_measurements()) {
-        measurements.clear();
+    esp_task_wdt_reset();
+    ArduinoOTA.handle();
 
-        for (const auto& sensor : sensors) {
-          sensor->provide_measurements(measurements);
-        }
-
-        for (const auto& reporter : measurement_reporters) {
-          reporter->report(measurements);
-        }
-
-        time(&data_last_read_timestamp);
-      }
-      else {
-        for (const auto& measurement : measurements) {
-          display.show(measurement);    
-          delay(display_each_measurement_for_in_millis);
-        }
-      }
+    if (ota_in_progress.load() || Update.isRunning()) {
+        return;
     }
-  }
+
+    if (!is_setup) return;
+
+    uint32_t now = millis();
+
+    if (reconnecting_mqtt_client) {
+         reconnecting_mqtt_client->loop();
+    }
+    if (ha_integration && reconnecting_mqtt_client && reconnecting_mqtt_client->is_connected()) {
+        ha_integration->loop();
+
+        static IPAddress last_known_ip;
+        if (last_known_ip != WiFi.localIP()) {
+            last_known_ip = WiFi.localIP();
+            ip_address = last_known_ip;
+            display.set_ip_address(ip_address.toString().c_str());
+            if (ha_integration) {
+                ha_integration->updateIpAddress(ip_address.toString().c_str());
+            }
+        }
+    }
+
+    display.set_connectivity(WiFi.isConnected(), reconnecting_mqtt_client ? reconnecting_mqtt_client->is_connected() : false);
+    uint32_t disp_interval = display_each_measurement_for_in_millis.load();
+    if (now - last_display_update_millis >= disp_interval || last_display_update_millis == 0) {
+        std::lock_guard<std::mutex> lock(measurements_mutex);
+        if (!measurements.empty()) {
+            if (ha_integration) {
+                ha_integration->report(measurements);
+            }
+            display.show(measurements[current_display_index]);
+            current_display_index = (current_display_index + 1) % measurements.size();
+            last_display_update_millis = now;
+        }
+    }
+
+    delay(10); // Yield to other tasks
 }

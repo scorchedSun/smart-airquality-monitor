@@ -38,34 +38,33 @@ public:
           success = true;
         }
         else {
-          switch (sensor.status)
-          {
-          case sensor.OK: // should never come here
-            break;     // included to compile without warnings
-          case sensor.ERROR_TIMEOUT:
-            logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_TIMEOUT);
-            break;
-          case sensor.ERROR_MSG_UNKNOWN:
-            logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_UNKNOWN);
-            break;
-          case sensor.ERROR_MSG_HEADER:
-            logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_HEADER);
-            break;
-          case sensor.ERROR_MSG_BODY:
-            logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_BODY);
-            break;
-          case sensor.ERROR_MSG_START:
-            logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_START);
-            break;
-          case sensor.ERROR_MSG_LENGTH:
-            logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_LENGTH);
-            break;
-          case sensor.ERROR_MSG_CKSUM:
-            logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_MSG_CKSUM);
-            break;
-          case sensor.ERROR_PMS_TYPE:
-            logger.log(Logger::Level::Error, "Reading PMS failed: {}", PMS_ERROR_PMS_TYPE);
-            break;
+          switch (sensor.status) {
+            case sensor.OK: // should never come here
+              break;     // included to compile without warnings
+            case sensor.ERROR_TIMEOUT:
+              logger.log(Logger::Level::Error, "Reading PMS failed: timeout");
+              break;
+            case sensor.ERROR_MSG_UNKNOWN:
+              logger.log(Logger::Level::Error, "Reading PMS failed: unknown message");
+              break;
+            case sensor.ERROR_MSG_HEADER:
+              logger.log(Logger::Level::Error, "Reading PMS failed: header error");
+              break;
+            case sensor.ERROR_MSG_BODY:
+              logger.log(Logger::Level::Error, "Reading PMS failed: body error");
+              break;
+            case sensor.ERROR_MSG_START:
+              logger.log(Logger::Level::Error, "Reading PMS failed: start error");
+              break;
+            case sensor.ERROR_MSG_LENGTH:
+              logger.log(Logger::Level::Error, "Reading PMS failed: length error");
+              break;
+            case sensor.ERROR_MSG_CKSUM:
+              logger.log(Logger::Level::Error, "Reading PMS failed: checksum error");
+              break;
+            case sensor.ERROR_PMS_TYPE:
+              logger.log(Logger::Level::Error, "Reading PMS failed: pms type error");
+              break;
           }
         }
         sensor.sleep();
