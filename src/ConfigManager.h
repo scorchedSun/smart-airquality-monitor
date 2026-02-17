@@ -4,7 +4,7 @@
 #include <string>
 #include <Preferences.h>
 #include <Esp.h>
-#include "config_keys.h"
+#include "ConfigKeys.h"
 
 class ConfigManager {
 private:
@@ -34,14 +34,6 @@ public:
     void buildMacId() {
         uint64_t mac = ESP.getEfuseMac();
         char buf[13];
-        // Extract bytes: mac is 48-bit (6 bytes). 
-        // ESP.getEfuseMac() returns the MAC address as a 64-bit integer.
-        // The bytes are in little-endian order in the uint64_t? 
-        // Actually, the previous code did:
-        // memcpy(mac, &efuse, 6); -> mac[0]..mac[5]
-        // And printed mac[0]..mac[5].
-        // The user wants the LAST 3 bytes.
-        // If we use the same memcpy approach:
         uint8_t mac_bytes[6];
         memcpy(mac_bytes, &mac, 6);
         snprintf(buf, sizeof(buf), "%02X%02X%02X", mac_bytes[3], mac_bytes[4], mac_bytes[5]);

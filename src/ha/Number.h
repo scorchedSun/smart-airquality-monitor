@@ -1,18 +1,18 @@
 #pragma once
 
-#include "HAComponent.h"
+#include "Component.h"
 #include <functional>
 
 namespace ha {
 
 class Number : public Component {
 private:
-    const std::string command_topic;
-    const float min_val;
-    const float max_val;
-    const float step_val;
-    std::function<void(float)> callback;
-    float current_value = 0;
+    const std::string command_topic_;
+    const float min_val_;
+    const float max_val_;
+    const float step_val_;
+    std::function<void(float)> callback_;
+    float current_value_ = 0;
 
 public:
     Number(const Device& device,
@@ -21,46 +21,46 @@ public:
              float min, float max, float step,
              std::function<void(float)> on_change_callback)
         : Component(device, "number", object_id, friendly_name)
-        , command_topic(base_topic + "/set")
-        , min_val(min)
-        , max_val(max)
-        , step_val(step)
-        , callback(on_change_callback)
+        , command_topic_(base_topic_ + "/set")
+        , min_val_(min)
+        , max_val_(max)
+        , step_val_(step)
+        , callback_(on_change_callback)
     {
     }
 
-    DynamicJsonDocument get_discovery_payload(const Device& device) const override {
-        DynamicJsonDocument doc = Component::get_discovery_payload(device);
-        doc["cmd_t"] = command_topic;
-        doc["min"] = min_val;
-        doc["max"] = max_val;
-        doc["step"] = step_val;
-        doc["val_tpl"] = std::string("{{ value_json.").append(object_id).append(" }}");
+    DynamicJsonDocument getDiscoveryPayload(const Device& device) const override {
+        DynamicJsonDocument doc = Component::getDiscoveryPayload(device);
+        doc["cmd_t"] = command_topic_;
+        doc["min"] = min_val_;
+        doc["max"] = max_val_;
+        doc["step"] = step_val_;
+        doc["val_tpl"] = std::string("{{ value_json.").append(object_id_).append(" }}");
         return doc;
     }
 
-    std::string get_command_topic() const override {
-        return command_topic;
+    std::string getCommandTopic() const override {
+        return command_topic_;
     }
 
-    std::vector<std::string> get_command_topics() const override {
-        return { command_topic };
+    std::vector<std::string> getCommandTopics() const override {
+        return { command_topic_ };
     }
 
-    std::string get_state_payload() const override {
-        return std::to_string(current_value);
+    std::string getStatePayload() const override {
+        return std::to_string(current_value_);
     }
 
-    void update_value(float value) {
-        current_value = value;
+    void updateValue(float value) {
+        current_value_ = value;
     }
 
-    void handle_command(const std::string& topic, const std::string& payload) override {
+    void handleCommand(const std::string& topic, const std::string& payload) override {
         if (payload.empty()) return;
         float new_val = atof(payload.c_str());
-        current_value = new_val;
-        if (callback) {
-            callback(new_val);
+        current_value_ = new_val;
+        if (callback_) {
+            callback_(new_val);
         }
     }
 };

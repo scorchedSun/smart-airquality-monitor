@@ -17,13 +17,13 @@
 #include "WiFi.h"
 #include "driver/ledc.h"
 
-#include "config_keys.h"
+#include "ConfigKeys.h"
 #include "ConfigManager.h"
 #include "WebConfig.h"
 
 #include "DHT20Wrapper.h"
 #include "Display.h"
-#include "HAIntegration.h"
+#include "ha/Integration.h"
 #include "Logger.h"
 #include "MHZ19Wrapper.h"
 #include "Measurement.h"
@@ -31,7 +31,7 @@
 #include "PWMFan.h"
 #include "ReconnectingPubSubClient.h"
 #include "Translator.h"
-#include "HAIntegration.h"
+#include "ha/Integration.h"
 #include <ArduinoOTA.h>
 #include <Update.h>
 
@@ -58,7 +58,7 @@ WebConfig web_config;
 
 // ── HA Integration ─────────────────────────────────────────────
 std::shared_ptr<ReconnectingPubSubClient> reconnecting_mqtt_client;
-std::unique_ptr<HAIntegration> ha_integration;
+std::unique_ptr<ha::Integration> ha_integration;
 
 // ── Sensors / Measurements ─────────────────────────────────────
 std::vector<std::unique_ptr<Sensor>> sensors;
@@ -409,7 +409,7 @@ void setup() {
     setup_mqtt(mac_id); 
 
     // Initialize HA Integration
-    ha_integration = std::make_unique<HAIntegration>(device_prefix, mac_id, friendly_name, app_version, reconnecting_mqtt_client);
+    ha_integration = std::make_unique<ha::Integration>(device_prefix, mac_id, friendly_name, app_version, reconnecting_mqtt_client);
     
     setup_ha();
 
