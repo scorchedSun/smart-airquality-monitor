@@ -363,8 +363,8 @@ public:
                 request->send(success ? 200 : 500, "text/plain",
                               success ? "Update OK. Rebooting..." : "Update failed.");
                 if (success) {
-                    delay(500);
-                    ESP.restart();
+                    should_reboot = true;
+                    reboot_timer = millis();
                 }
             },
             // File upload handler (called per chunk)
@@ -413,7 +413,16 @@ public:
         server.end();
     }
 
+    bool should_reboot = false;
+    uint32_t reboot_timer = 0;
+
     void restart() {
         server.begin();
+    }
+
+    void loop() {
+        if (should_reboot && millis() - reboot_timer > 2000) {
+            ESP.restart();
+        }
     }
 };

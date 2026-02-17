@@ -469,6 +469,8 @@ void loop() {
         }
     }
 
+    web_config.loop();
+
     display.set_connectivity(WiFi.isConnected(), reconnecting_mqtt_client ? reconnecting_mqtt_client->isConnected() : false);
     uint32_t disp_interval = display_each_measurement_for_in_millis.load();
     if (now - last_display_update_millis >= disp_interval || last_display_update_millis == 0) {
