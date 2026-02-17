@@ -69,13 +69,13 @@ public:
         std::lock_guard<std::mutex> lock(integration_mutex_);
         bool updated = false;
         for (const auto& measurement : measurements) {
-            MeasurementType type = measurement->get_details().get_type();
+            MeasurementType type = measurement->getDetails().getType();
             
             auto it = sensors_.find(type);
             if (it == sensors_.end()) continue;
 
             const auto& sensor = it->second;
-            sensor->updateState(measurement->value_to_string());
+            sensor->updateState(measurement->valueToString());
             updated = true;
         }
 

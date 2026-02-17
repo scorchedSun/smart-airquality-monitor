@@ -25,7 +25,7 @@ public:
         return true;
     }
 
-    bool provide_measurements(std::vector<std::unique_ptr<Measurement>>& measurements) override {
+    bool provideMeasurements(std::vector<std::unique_ptr<Measurement>>& measurements) override {
         bool success(false);
 
         sensor.wake();

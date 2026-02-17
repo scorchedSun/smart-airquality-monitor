@@ -10,90 +10,90 @@ enum class MeasurementUnit { DegreesCelcius, Percent, PPM, MicroGramPerCubicMete
 
 class MeasurementDetails {
     private:
-        const MeasurementType type;     
-        const MeasurementUnit unit;
+        const MeasurementType type_;     
+        const MeasurementUnit unit_;
     
     public:
         MeasurementDetails(const MeasurementType type, const MeasurementUnit unit) 
-            : type(type)
-            , unit(unit) {
+            : type_(type)
+            , unit_(unit) {
         }
 
-        MeasurementType get_type() const {
-            return type;
+        MeasurementType getType() const {
+            return type_;
         }
 
-        MeasurementUnit get_unit() const {
-            return unit;
+        MeasurementUnit getUnit() const {
+            return unit_;
         }
 };
 
 class Measurement {
     private:
-        const MeasurementDetails details;
+        const MeasurementDetails details_;
 
     protected:
         Measurement(const MeasurementDetails details) 
-            : details(details) {
+            : details_(details) {
         }
 
     private:
-        mutable std::string cached_value;
+        mutable std::string cached_value_;
 
     protected:
-        virtual std::string format_value() const = 0;
+        virtual std::string formatValue() const = 0;
 
     public:
-        MeasurementDetails get_details() const {
-            return details;
+        MeasurementDetails getDetails() const {
+            return details_;
         }
 
-        const std::string& value_to_string() const {
-            if (cached_value.empty()) {
-                cached_value = format_value();
+        const std::string& valueToString() const {
+            if (cached_value_.empty()) {
+                cached_value_ = formatValue();
             }
-            return cached_value;
+            return cached_value_;
         }
 };
 
 class DecimalMeasurement : public Measurement 
 {
     private:
-        const double value;
+        const double value_;
 
     public:
         DecimalMeasurement(const MeasurementDetails details, const double value)
             : Measurement(details)
-            , value(value) 
+            , value_(value) 
         {                
         }
 
-        double get_value() const {
-            return value;
+        double getValue() const {
+            return value_;
         }
 
-        std::string format_value() const override {
-            return std::format("{:.2f}", value);
+        std::string formatValue() const override {
+            return std::format("{:.2f}", value_);
         }
 };
 
 class RoundNumberMeasurement : public Measurement
 {
     private:
-        const uint32_t value;
+        const uint32_t value_;
 
     public:
         RoundNumberMeasurement(const MeasurementDetails details, const uint32_t value) 
             : Measurement(details)
-            , value(value)
+            , value_(value)
         {            
         }
 
-        uint32_t get_value() const {
-            return value;
+        uint32_t getValue() const {
+            return value_;
         }
 
-        std::string format_value() const override {
-            return std::to_string(value);
+        std::string formatValue() const override {
+            return std::to_string(value_);
         }
 };

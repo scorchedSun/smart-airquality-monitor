@@ -15,12 +15,13 @@ public:
     using ConfigChangeCallback = std::function<void()>;
 
 private:
-    AsyncWebServer server;
-    ConfigChangeCallback on_config_changed;
-    bool ap_mode = false;
-    size_t update_content_len = 0;
+    AsyncWebServer server_;
+    ConfigChangeCallback on_config_changed_;
+    bool ap_mode_ = false;
+    size_t update_content_len_ = 0;
 
     static const char* getConfigPage() {
+        // ... (HTML content unchanged, omitted for brevity if tool supported it, but must include full content here)
         static const char page[] PROGMEM = R"rawhtml(
 <!DOCTYPE html>
 <html lang="en">
@@ -266,16 +267,16 @@ function doUpload(){
     }
 
 public:
-    WebConfig(uint16_t port = 80) : server(port) {}
+    WebConfig(uint16_t port = 80) : server_(port) {}
 
     void begin(ConfigChangeCallback callback = nullptr) {
-        on_config_changed = callback;
+        on_config_changed_ = callback;
 
-        server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+        server_.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
             request->send(200, "text/html", getConfigPage());
         });
 
-        server.on("/api/config", HTTP_GET, [](AsyncWebServerRequest* request) {
+        server_.on("/api/config", HTTP_GET, [](AsyncWebServerRequest* request) {
             auto& cm = ConfigManager::getInstance();
             StaticJsonDocument<768> doc;
             doc[cfg::keys::wifi_ssid]         = cm.getString(cfg::keys::wifi_ssid, cfg::defaults::wifi_ssid);
@@ -298,7 +299,7 @@ public:
             request->send(200, "application/json", output.c_str());
         });
 
-        server.on("/api/config", HTTP_POST,
+        server_.on("/api/config", HTTP_POST,
             [](AsyncWebServerRequest* request) {},
             nullptr,
             [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
@@ -341,22 +342,22 @@ public:
 
                 request->send(200, "application/json", "{\"ok\":true}");
 
-                if (on_config_changed) on_config_changed();
+                if (on_config_changed_) on_config_changed_();
             }
         );
 
-        server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest* request) {
+        server_.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest* request) {
             request->send(200, "application/json", "{\"ok\":true}");
             delay(500);
             ESP.restart();
         });
 
         // ── Firmware Update Page ──
-        server.on("/update", HTTP_GET, [](AsyncWebServerRequest* request) {
+        server_.on("/update", HTTP_GET, [](AsyncWebServerRequest* request) {
             request->send(200, "text/html", getUpdatePage());
         });
 
-        server.on("/api/update", HTTP_POST,
+        server_.on("/api/update", HTTP_POST,
             // Request complete handler
             [this](AsyncWebServerRequest* request) {
                 bool success = !Update.hasError();
@@ -371,9 +372,9 @@ public:
             [this](AsyncWebServerRequest* request, const String& filename,
                    size_t index, uint8_t* data, size_t len, bool final) {
                 if (index == 0) {
-                    update_content_len = request->contentLength();
+                    update_content_len_ = request->contentLength();
                     logger.log(Logger::Level::Info, "Web OTA start: %s, size: %u",
-                               filename.c_str(), (uint32_t)update_content_len);
+                               filename.c_str(), (uint32_t)update_content_len_);
                     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
                         logger.log(Logger::Level::Error, "Update.begin failed");
                         Update.printError(Serial);
@@ -396,28 +397,28 @@ public:
             }
         );
 
-        server.begin();
+        server_.begin();
         logger.log(Logger::Level::Info, "WebConfig server started");
     }
 
     void setupCaptivePortal(const std::string& apName) {
-        ap_mode = true;
+        ap_mode_ = true;
         WiFi.softAP(apName.c_str());
         logger.log(Logger::Level::Info, "AP started: %s, IP: %s", apName.c_str(),
                    WiFi.softAPIP().toString().c_str());
     }
 
-    bool isApMode() const { return ap_mode; }
+    bool isApMode() const { return ap_mode_; }
 
     void stop() {
-        server.end();
+        server_.end();
     }
 
     bool should_reboot = false;
     uint32_t reboot_timer = 0;
 
     void restart() {
-        server.begin();
+        server_.begin();
     }
 
     void loop() {

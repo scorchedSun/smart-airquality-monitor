@@ -32,7 +32,7 @@ public:
         return true;
     }
 
-    bool provide_measurements(std::vector<std::unique_ptr<Measurement>>& measurements) override {
+    bool provideMeasurements(std::vector<std::unique_ptr<Measurement>>& measurements) override {
         if (millis() - warmup_start_millis < warmup_duration_millis) {
             return false;
         }

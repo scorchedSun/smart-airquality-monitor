@@ -21,7 +21,7 @@ public:
         return sensor.begin();
     }
 
-    bool provide_measurements(std::vector<std::unique_ptr<Measurement>>& measurements) override {
+    bool provideMeasurements(std::vector<std::unique_ptr<Measurement>>& measurements) override {
         int status;
         {
             std::lock_guard<std::mutex> lock(i2c_mutex);
