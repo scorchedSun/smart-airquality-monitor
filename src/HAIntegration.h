@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <map>
+#include <mutex>
 #include "HAMqtt.h"
 #include "HomeAssistantManager.h"
 #include "HAFan.h"
@@ -19,17 +20,21 @@ public:
     using FanCallback = std::function<void(bool state, uint8_t speed)>;
     using DisplayCallback = std::function<void(bool state)>;
     using ConfigSaveCallback = std::function<void(const std::string& key, int value)>;
+    using ReconnectedCallback = std::function<void()>;
 
     HAIntegration(const std::string& device_prefix, const std::string& mac_id, 
-                  const std::string& friendly_name, const std::string& app_version);
+                  const std::string& friendly_name, const std::string& app_version,
+                  std::shared_ptr<ha::MqttClient> mqtt_client);
 
-    void begin(std::shared_ptr<ha::MqttClient> mqtt_client);
+    void begin();
 
     void setFanCallback(FanCallback cb);
     void setDisplayCallback(DisplayCallback cb);
     void setConfigSaveCallback(ConfigSaveCallback cb);
+    void setReconnectedCallback(ReconnectedCallback cb);
 
-    void addSensor(MeasurementType type, std::shared_ptr<ha::Sensor> sensor);
+    void addSensor(MeasurementType type, const std::string& object_id, const std::string& name, 
+                   const std::string& device_class, const std::string& unit);
     
     void report(const std::vector<std::unique_ptr<Measurement>>& measurements);
 
@@ -44,6 +49,7 @@ public:
     std::shared_ptr<ha::Device> getDevice() const;
 
 private:
+    std::shared_ptr<ha::MqttClient> mqtt_client;
     std::shared_ptr<ha::Device> device;
     std::shared_ptr<ha::Manager> manager;
     
@@ -55,12 +61,16 @@ private:
 
     std::map<MeasurementType, std::shared_ptr<ha::Sensor>> sensors;
     bool needs_report = false;
+    bool last_connected_state = false;
 
     FanCallback fan_cb;
     DisplayCallback display_cb;
     ConfigSaveCallback config_save_cb;
+    ReconnectedCallback reconnected_cb;
 
     std::vector<std::pair<MeasurementType, std::shared_ptr<ha::Sensor>>> pending_sensors;
+    
+    mutable std::mutex integration_mutex;
 
     void setupControls();
 };

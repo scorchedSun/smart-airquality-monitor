@@ -52,7 +52,6 @@ public:
 
     void handle_command(const std::string& topic, const std::string& payload) override {
         bool new_state = (payload == "ON");
-        Logger::getInstance().log(Logger::Level::Info, "HASwitch: Received command payload '{}', new_state: {}", payload, new_state);
         update_state(new_state);
         if (callback) {
             callback(new_state);

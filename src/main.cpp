@@ -31,7 +31,6 @@
 #include "PWMFan.h"
 #include "ReconnectingPubSubClient.h"
 #include "Translator.h"
-#include "PubSubClientAdapter.h"
 #include "HAIntegration.h"
 #include <ArduinoOTA.h>
 #include <Update.h>
@@ -141,7 +140,7 @@ bool connectWifi() {
 // ═══════════════════════════════════════════════════════════════
 //  Home Assistant
 // ═══════════════════════════════════════════════════════════════
-void setup_ha(std::shared_ptr<ReconnectingPubSubClient> mqtt_client) {
+void setup_ha() {
     if (ha_integration) {
         ha_integration->setFanCallback([](bool state, uint8_t speed) {
             if (state) {
@@ -166,31 +165,21 @@ void setup_ha(std::shared_ptr<ReconnectingPubSubClient> mqtt_client) {
             if (key == cfg::keys::report_interval) report_interval_in_seconds.store(value * 60);
         });
 
-        // Set the callback to initialize HA only when we are actually connected
-        mqtt_client->set_on_connect_callback([]() {
-            static bool ha_initialized = false;
-            if (ha_initialized) return;
+        ha_integration->begin();
 
-            logger.log(Logger::Level::Info, "Initial MQTT connection established, starting HA");
+        // Register sensors
+        ha_integration->addSensor(MeasurementType::Temperature, "temp", "Temperature", "temperature", "°C");
+        ha_integration->addSensor(MeasurementType::Humidity, "hum", "Humidity", "humidity", "%");
+        ha_integration->addSensor(MeasurementType::CO2, "co2", "CO2", "carbon_dioxide", "ppm");
+        ha_integration->addSensor(MeasurementType::PM1, "pm1", "PM1", "pm1", "µg/m³");
+        ha_integration->addSensor(MeasurementType::PM25, "pm25", "PM2.5", "pm25", "µg/m³");
+        ha_integration->addSensor(MeasurementType::PM10, "pm10", "PM10", "pm10", "µg/m³");
+
+        // synchronize state when we (re)connect to MQTT
+        ha_integration->setReconnectedCallback([]() {
+            logger.log(Logger::Level::Info, "MQTT connection established, syncing HA state");
             
             if (ha_integration) {
-                ha_integration->begin(std::make_shared<PubSubClientAdapter>(mqtt_client));
-                
-                // Register sensors
-                ha_integration->addSensor(MeasurementType::Temperature,
-                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "temp", "Temperature", "temperature", "°C"));
-                ha_integration->addSensor(MeasurementType::Humidity,
-                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "hum", "Humidity", "humidity", "%"));
-                ha_integration->addSensor(MeasurementType::CO2,
-                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "co2", "CO2", "carbon_dioxide", "ppm"));
-                ha_integration->addSensor(MeasurementType::PM1,
-                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "pm1", "PM1", "pm1", "µg/m³"));
-                ha_integration->addSensor(MeasurementType::PM25,
-                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "pm25", "PM2.5", "pm25", "µg/m³"));
-                ha_integration->addSensor(MeasurementType::PM10,
-                    std::make_shared<ha::Sensor>(*ha_integration->getDevice(), "pm10", "PM10", "pm10", "µg/m³"));
-
-                // Sync initial state to HA
                 ha_integration->syncState(
                     display_enabled.load(),
                     display_each_measurement_for_in_millis.load(),
@@ -199,8 +188,6 @@ void setup_ha(std::shared_ptr<ReconnectingPubSubClient> mqtt_client) {
                     fan_speed_percent.load() > 0
                 );
             }
-            
-            ha_initialized = true;
         });
     }
 }
@@ -226,8 +213,6 @@ void setup_mqtt(const std::string& mqtt_device_id) {
 
     reconnecting_mqtt_client = std::make_shared<ReconnectingPubSubClient>(
         broker, port, user, password, mqtt_device_id);
-
-    setup_ha(std::make_shared(reconnecting_mqtt_client));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -262,12 +247,6 @@ void sensorTask(void* parameter) {
 
         if (is_setup) {
             uint32_t now = millis();
-
-            // Heap monitoring every 60s
-            if (now - last_heap_log >= 60000) {
-                logger.log(Logger::Level::Debug, "Free heap: %u bytes", ESP.getFreeHeap());
-                last_heap_log = now;
-            }
 
             uint32_t interval = report_interval_in_seconds.load() * 1000;
             if (now - last_sensor_read_millis >= interval || last_sensor_read_millis == 0) {
@@ -411,7 +390,7 @@ void setup() {
 
     ip_address = WiFi.localIP();
     mac_id = cm.getMacId();
-    display.set_ip_address(ip_address.toStrinrr.c_str());
+    display.set_ip_address(ip_address.toString().c_str());
 
     setup_ota();
 
@@ -426,10 +405,13 @@ void setup() {
     }
 
     std::string friendly_name = cm.getString(cfg::keys::friendly_name, cfg::defaults::friendly_name);
-    // Initialize HA Integration
-    ha_integration = std::make_unique<HAIntegration>(device_prefix, mac_id, friendly_name, app_version);
     
-    setup_mqtt(ha_integration->getDeviceId());
+    setup_mqtt(mac_id); 
+
+    // Initialize HA Integration
+    ha_integration = std::make_unique<HAIntegration>(device_prefix, mac_id, friendly_name, app_version, reconnecting_mqtt_client);
+    
+    setup_ha();
 
     boot_msg.store("Sensors...");
     initialize_sensors();
@@ -473,7 +455,7 @@ void loop() {
     if (reconnecting_mqtt_client) {
          reconnecting_mqtt_client->loop();
     }
-    if (ha_integration && reconnecting_mqtt_client && reconnecting_mqtt_client->is_connected()) {
+    if (ha_integration && reconnecting_mqtt_client && reconnecting_mqtt_client->isConnected()) {
         ha_integration->loop();
 
         static IPAddress last_known_ip;
@@ -487,7 +469,7 @@ void loop() {
         }
     }
 
-    display.set_connectivity(WiFi.isConnected(), reconnecting_mqtt_client ? reconnecting_mqtt_client->is_connected() : false);
+    display.set_connectivity(WiFi.isConnected(), reconnecting_mqtt_client ? reconnecting_mqtt_client->isConnected() : false);
     uint32_t disp_interval = display_each_measurement_for_in_millis.load();
     if (now - last_display_update_millis >= disp_interval || last_display_update_millis == 0) {
         std::lock_guard<std::mutex> lock(measurements_mutex);

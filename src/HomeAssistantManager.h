@@ -3,6 +3,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <mutex>
 #include "HAMqtt.h"
 #include "HADevice.h"
 #include "HAComponent.h"
@@ -20,6 +21,8 @@ private:
     bool discovery_published = false;
     uint32_t last_report_time = 0;
     const uint32_t report_interval = 30000; // 30 seconds
+    
+    mutable std::recursive_mutex manager_mutex;
 
 public:
     Manager(const std::shared_ptr<Device> device,
@@ -32,6 +35,7 @@ public:
             std::string t(topic);
             std::string p = (payload && length > 0) ? std::string((const char*)payload, length) : "";
             
+            std::lock_guard<std::recursive_mutex> lock(manager_mutex);
             auto it = command_topics.find(t);
             if (it != command_topics.end()) {
                 it->second->handle_command(t, p);
@@ -40,6 +44,7 @@ public:
     }
 
     void add_component(std::shared_ptr<Component> component) {
+        std::lock_guard<std::recursive_mutex> lock(manager_mutex);
         components.push_back(component);
         
         for (const auto& topic : component->get_command_topics()) {
@@ -50,8 +55,9 @@ public:
         }
     }
 
-    void publish_discovery() {
-        if (discovery_published) return;
+    void publish_discovery(bool force = false) {
+        std::lock_guard<std::recursive_mutex> lock(manager_mutex);
+        if (discovery_published && !force) return;
         
         bool all_published = true;
         for (const auto& comp : components) {
@@ -66,6 +72,12 @@ public:
     }
 
     void report_state(bool force = false) {
+        std::lock_guard<std::recursive_mutex> lock(manager_mutex);
+        if (!mqtt_client->isConnected()) {
+            discovery_published = false; // Reset discovery on disconnect
+            return;
+        }
+
         bool was_published = discovery_published;
         if (!discovery_published) publish_discovery();
         if (!discovery_published) return;
@@ -76,7 +88,7 @@ public:
         if (!force && (now - last_report_time < report_interval)) return;
         last_report_time = now;
 
-        StaticJsonDocument<768> state_json;
+        StaticJsonDocument<1024> state_json; // Slightly larger for safety
         JsonObject root = state_json.to<JsonObject>();
         for (const auto& comp : components) {
             comp->populate_state(root);

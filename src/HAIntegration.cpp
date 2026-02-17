@@ -1,15 +1,16 @@
 #include "HAIntegration.h"
-#include "PubSubClientAdapter.h"
 #include "Logger.h"
 #include "config_keys.h"
 
 HAIntegration::HAIntegration(const std::string& device_prefix, const std::string& mac_id, 
-                             const std::string& friendly_name, const std::string& app_version) {
+                             const std::string& friendly_name, const std::string& app_version,
+                             std::shared_ptr<ha::MqttClient> mqtt_client)
+    : mqtt_client(mqtt_client) {
     device = std::make_shared<ha::Device>(device_prefix, mac_id, friendly_name, app_version);
+    manager = std::make_shared<ha::Manager>(device, mqtt_client);
 }
 
-void HAIntegration::begin(std::shared_ptr<ha::MqttClient> mqtt_client) {
-    manager = std::make_shared<ha::Manager>(device, mqtt_client);
+void HAIntegration::begin() {
     setupControls();
 }
 
@@ -25,9 +26,14 @@ void HAIntegration::setConfigSaveCallback(ConfigSaveCallback cb) {
     config_save_cb = cb;
 }
 
+void HAIntegration::setReconnectedCallback(ReconnectedCallback cb) {
+    std::lock_guard<std::mutex> lock(integration_mutex);
+    reconnected_cb = cb;
+}
+
 void HAIntegration::setupControls() {
     if (!manager) return;
-
+    
     // Display Switch
     display_switch = std::make_shared<ha::Switch>(*device, "display_toggle", "Display Enabled",
         [this](bool state) {
@@ -77,14 +83,19 @@ void HAIntegration::setupControls() {
     manager->add_component(ip_sensor);
 }
 
-void HAIntegration::addSensor(MeasurementType type, std::shared_ptr<ha::Sensor> sensor) {
+void HAIntegration::addSensor(MeasurementType type, const std::string& object_id, 
+                               const std::string& name, const std::string& device_class, 
+                               const std::string& unit) {
+    std::lock_guard<std::mutex> lock(integration_mutex);
     if (!manager) return;
     
+    auto sensor = std::make_shared<ha::Sensor>(*device, object_id, name, device_class, unit);
     manager->add_component(sensor);
     sensors[type] = sensor;
 }
 
 void HAIntegration::report(const std::vector<std::unique_ptr<Measurement>>& measurements) {
+    std::lock_guard<std::mutex> lock(integration_mutex);
     bool updated = false;
     for (const auto& measurement : measurements) {
         MeasurementType type = measurement->get_details().get_type();
@@ -103,7 +114,8 @@ void HAIntegration::report(const std::vector<std::unique_ptr<Measurement>>& meas
 }
 
 void HAIntegration::syncState(bool display_enabled, uint32_t display_interval_ms, 
-                              uint32_t report_interval_s, uint8_t fan_speed, bool fan_on) {
+                               uint32_t report_interval_s, uint8_t fan_speed, bool fan_on) {
+    std::lock_guard<std::mutex> lock(integration_mutex);
     if (display_switch) display_switch->update_state(display_enabled);
     if (display_interval) display_interval->update_value(display_interval_ms / 1000.0f);
     if (report_interval) report_interval->update_value(report_interval_s / 60.0f);
@@ -117,6 +129,7 @@ void HAIntegration::syncState(bool display_enabled, uint32_t display_interval_ms
 }
 
 void HAIntegration::updateIpAddress(const std::string& ip) {
+    std::lock_guard<std::mutex> lock(integration_mutex);
     if (ip_sensor) {
         ip_sensor->update_state(ip.c_str());
         if (manager) manager->report_state(true);
@@ -124,19 +137,38 @@ void HAIntegration::updateIpAddress(const std::string& ip) {
 }
 
 std::string HAIntegration::getDeviceId() const {
+    std::lock_guard<std::mutex> lock(integration_mutex);
     return device ? device->get_device_id() : "";
 }
 
 std::shared_ptr<ha::Device> HAIntegration::getDevice() const {
+    std::lock_guard<std::mutex> lock(integration_mutex);
     return device;
 }
 
 void HAIntegration::loop() {
-    if (manager) manager->report_state(); // Periodic report
+    std::unique_lock<std::mutex> lock(integration_mutex);
     
-    if (needs_report) {
-        if (manager) manager->report_state(true);
-        needs_report = false;
+    if (mqtt_client && mqtt_client->isConnected()) {
+        if (!last_connected_state) {
+            last_connected_state = true;
+            Logger::getInstance().log(Logger::Level::Info, "HAIntegration: MQTT Reconnected");
+            if (reconnected_cb) {
+                // Unlock before callback to avoid deadlocks if callback calls back into HAIntegration
+                lock.unlock();
+                reconnected_cb();
+                lock.lock();
+            }
+        }
+        
+        if (manager) manager->report_state(); // Periodic report
+        
+        if (needs_report) {
+            if (manager) manager->report_state(true);
+            needs_report = false;
+        }
+    } else {
+        last_connected_state = false;
     }
 }
 

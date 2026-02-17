@@ -5,6 +5,7 @@
 
 #include <string>
 #include <memory>
+#include <mutex>
 #include "ArduinoJson.h"
 #include "Logger.h"
 #include <PubSubClient.h>
@@ -12,7 +13,9 @@
 #include <vector>
 #include <algorithm>
 
-class ReconnectingPubSubClient {
+#include "HAMqtt.h"
+
+class ReconnectingPubSubClient : public ha::MqttClient {
 public:
     using MessageCallback = std::function<void(char*, uint8_t*, unsigned int)>;
 
@@ -20,7 +23,7 @@ public:
 
 private:
     WiFiClient wifi_client;
-    PubSubClient mqtt_client;
+    mutable PubSubClient pubsub_client;
     const std::string broker;
     const uint16_t port;
     const std::string mqtt_user;
@@ -29,19 +32,18 @@ private:
 
     uint32_t last_connection_attempt_timestamp = 0;
     uint32_t current_backoff_ms = 1000;
+
     static constexpr uint32_t min_backoff_ms = 1000;
     static constexpr uint32_t max_backoff_ms = 60000;
 
     std::vector<std::string> subscribed_topics;
-    MessageCallback message_callback;
     
-    using ConnectionCallback = std::function<void()>;
-    ConnectionCallback on_connect_callback;
+    mutable std::recursive_mutex mqtt_mutex;
 
     bool establish_connection_to_broker() {
-        bool is_conn = mqtt_client.connected();
+        std::lock_guard<std::recursive_mutex> lock(mqtt_mutex);
         
-        if (is_conn) {
+        if (pubsub_client.connected()) {
             current_backoff_ms = min_backoff_ms;
             return true;
         }
@@ -58,16 +60,28 @@ private:
 
         last_connection_attempt_timestamp = now;
 
-        wifi_client.stop(); // Ensure clean state 
-        delay(100);
-
         const char* user_ptr = mqtt_user.empty() ? nullptr : mqtt_user.c_str();
         const char* pass_ptr = mqtt_password.empty() ? nullptr : mqtt_password.c_str();
 
-        if (!mqtt_client.connect(client_id.c_str(), user_ptr, pass_ptr)) {
-            int state = mqtt_client.state();
+        // Ensure we're using the correct address type
+        IPAddress broker_ip;
+        if (broker_ip.fromString(broker.c_str())) {
+             pubsub_client.setServer(broker_ip, port);
+        } else {
+             pubsub_client.setServer(broker.c_str(), port);
+        }
+
+        logger.log(Logger::Level::Info, "Attempting MQTT connection to %s:%d as %s", 
+                   broker.c_str(), port, client_id.c_str());
+
+        if (!pubsub_client.connect(client_id.c_str(), user_ptr, pass_ptr)) {
+            int state = pubsub_client.state();
             logger.log(Logger::Level::Warning, "MQTT connect failed (state %d), retry in %ums",
                        state, current_backoff_ms);
+            
+            // Explicitly stop the client on failure to clear the socket
+            wifi_client.stop();
+
             current_backoff_ms = std::min(current_backoff_ms * 2, max_backoff_ms);
             return false;
         }
@@ -76,88 +90,87 @@ private:
         current_backoff_ms = min_backoff_ms;
 
         for (const auto& topic : subscribed_topics) {
-            mqtt_client.subscribe(topic.c_str());
-        }
-
-        if (on_connect_callback) {
-            on_connect_callback();
+            pubsub_client.subscribe(topic.c_str());
         }
 
         return true;
     }
 
 public:
-public:
     ReconnectingPubSubClient(const std::string& broker,
                              uint16_t port,
                              const std::string& mqtt_user,
                              const std::string& mqtt_password,
                              const std::string& client_id)
-        : mqtt_client(wifi_client)
+        : pubsub_client(wifi_client)
         , broker(broker)
         , port(port)
         , mqtt_user(mqtt_user)
         , mqtt_password(mqtt_password)
         , client_id(client_id)
     {
-        mqtt_client.setServer(broker.c_str(), port);
-        mqtt_client.setBufferSize(2048);
+        pubsub_client.setBufferSize(2048);
     }
 
-    void set_callback(MessageCallback callback) {
-        this->message_callback = callback;
-        mqtt_client.setCallback([this](char* topic, uint8_t* payload, unsigned int length) {
-            if (this->message_callback) {
-                this->message_callback(topic, payload, length);
+    void set_callback(ha::MqttClient::MessageCallback callback) override {
+        std::lock_guard<std::recursive_mutex> lock(mqtt_mutex);
+        pubsub_client.setCallback([this, callback](char* topic, uint8_t* payload, unsigned int length) {
+            if (callback) {
+                callback(topic, payload, length);
             }
         });
     }
 
-    void set_on_connect_callback(ConnectionCallback callback) {
-        this->on_connect_callback = callback;
-    }
-
-    void subscribe(const std::string& topic) {
-        subscribed_topics.push_back(topic);
-        if (mqtt_client.connected()) {
-            mqtt_client.subscribe(topic.c_str());
+    void subscribe(const std::string& topic) override {
+        std::lock_guard<std::recursive_mutex> lock(mqtt_mutex);
+        auto it = std::find(subscribed_topics.begin(), subscribed_topics.end(), topic);
+        if (it == subscribed_topics.end()) {
+            subscribed_topics.push_back(topic);
+        }
+        if (pubsub_client.connected()) {
+            pubsub_client.subscribe(topic.c_str());
         }
     }
 
     void loop() {
+        std::lock_guard<std::recursive_mutex> lock(mqtt_mutex);
         if (establish_connection_to_broker()) {
-            mqtt_client.loop();
+            pubsub_client.loop();
         }
     }
 
-    bool is_connected() {
-        return mqtt_client.connected();
+    bool isConnected() const override {
+        std::lock_guard<std::recursive_mutex> lock(mqtt_mutex);
+        return pubsub_client.connected();
     }
 
     void disconnect() {
-        mqtt_client.disconnect();
+        std::lock_guard<std::recursive_mutex> lock(mqtt_mutex);
+        pubsub_client.disconnect();
     }
 
-    Error publish(const std::string& topic, const std::string& payload, bool retain = false) {
-        if (mqtt_client.connected()) {
-            if (!mqtt_client.publish(topic.c_str(), payload.c_str(), retain)) {
+    bool publish(const std::string& topic, const std::string& payload, bool retain = false) override {
+        std::lock_guard<std::recursive_mutex> lock(mqtt_mutex);
+        if (pubsub_client.connected()) {
+            if (!pubsub_client.publish(topic.c_str(), payload.c_str(), retain)) {
                 logger.log(Logger::Level::Warning, "MQTT publish failed: %d",
-                           mqtt_client.getWriteError());
-                return Error::PublishFailed;
+                           pubsub_client.getWriteError());
+                return false;
             }
-            return Error::None;
+            return true;
         }
-        return Error::ReconnectFailed;
+        return false;
     }
 
-    Error publish(const std::string& topic, const JsonDocument& data, bool retain = false) {
-        if (mqtt_client.connected()) {
+    Error publishJson(const std::string& topic, const JsonDocument& data, bool retain = false) {
+        std::lock_guard<std::recursive_mutex> lock(mqtt_mutex);
+        if (pubsub_client.connected()) {
             std::string buffer;
             serializeJson(data, buffer);
 
-            if (!mqtt_client.publish(topic.c_str(), buffer.c_str(), retain)) {
+            if (!pubsub_client.publish(topic.c_str(), buffer.c_str(), retain)) {
                 logger.log(Logger::Level::Warning, "MQTT publish failed: %d",
-                           mqtt_client.getWriteError());
+                           pubsub_client.getWriteError());
                 return Error::PublishFailed;
             }
 
