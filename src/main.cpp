@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "soc/rtc_cntl_reg.h"
@@ -38,8 +39,8 @@
 // ── Constants ──────────────────────────────────────────────────
 static constexpr uint32_t mhz19_baud_rate = 9600;
 static constexpr uint32_t fan_frequency_hz = 25000;
-static const std::string app_version = "1.1.0";
-static const std::string device_prefix = "smaq_";
+static constexpr std::string_view app_version = "1.1.0";
+static constexpr std::string_view device_prefix = "smaq_";
 
 // ── Shared State (atomic for cross-core access) ────────────────
 std::atomic<uint32_t> report_interval_in_seconds{300};
@@ -196,7 +197,7 @@ void setupHa() {
 //  MQTT
 // ═══════════════════════════════════════════════════════════════
 
-void setupMqtt(const std::string& mqtt_device_id, const std::string& lwt_topic, const std::string& lwt_payload) {
+void setupMqtt(std::string_view mqtt_device_id, std::string_view lwt_topic, std::string_view lwt_payload) {
     auto& cm = ConfigManager::getInstance();
     std::string broker = cm.getString(cfg::keys::mqtt_broker, cfg::defaults::mqtt_broker);
     uint16_t port = cm.getInt(cfg::keys::mqtt_port, cfg::defaults::mqtt_port);
@@ -212,7 +213,7 @@ void setupMqtt(const std::string& mqtt_device_id, const std::string& lwt_topic, 
     }
 
     reconnecting_mqtt_client = std::make_shared<ReconnectingPubSubClient>(
-        broker, port, user, password, mqtt_device_id,
+        broker.c_str(), port, user.c_str(), password.c_str(), mqtt_device_id,
         lwt_topic, lwt_payload, true, 0);
 }
 
@@ -399,7 +400,7 @@ void setup() {
         delay(150);
 
         std::string message = "WiFi failed. Arr" + hostName;
-        display.show(message);
+        display.show(message.c_str());
         return;
     }
 
@@ -416,15 +417,15 @@ void setup() {
         IPAddress syslog_addr;
         syslog_addr.fromString(syslog_ip.c_str());
         uint16_t syslog_port = cm.getInt(cfg::keys::syslog_server_port, cfg::defaults::syslog_server_port);
-        logger.setupSyslog(syslog_addr, syslog_port, mac_id, Logger::Level::Info);
+        logger.setupSyslog(syslog_addr, syslog_port, mac_id.c_str(), Logger::Level::Info);
     }
 
     std::string friendly_name = cm.getString(cfg::keys::friendly_name, cfg::defaults::friendly_name);
     
-    auto device = std::make_shared<ha::Device>(device_prefix, mac_id, friendly_name, app_version);
+    auto device = std::make_shared<ha::Device>(device_prefix, mac_id.c_str(), friendly_name.c_str(), app_version);
 
-    setupMqtt(mac_id, device->getAvailabilityTopic(), device->getAvailabilityPayloadOffline()); 
-
+    setupMqtt(mac_id.c_str(), device->getAvailabilityTopic(), device->getAvailabilityPayloadOffline()); 
+    
     ha_integration = std::make_unique<ha::Integration>(device, reconnecting_mqtt_client);
     
     setupHa();

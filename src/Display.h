@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <memory>
 #include <mutex>
 
@@ -40,7 +41,7 @@ private:
         display_.drawBitmap(106, 0, mqtt_connected_ ? mqtt_ico : mqtt_none_ico, 10, 10, SSD1306_WHITE);
     }
 
-    const uint8_t* getIconForType(MeasurementType type) {
+    static const uint8_t* getIconForType(MeasurementType type) {
         switch (type) {
             case MeasurementType::Temperature: return temp_ico;
             case MeasurementType::Humidity: return hum_ico;
@@ -120,11 +121,11 @@ public:
         this->mqtt_connected_ = mqtt;
     }
 
-    void setIpAddress(const std::string& ip_address) {
-        this->ip_address_ = ip_address;
+    void setIpAddress(const char* ip_address) {
+        this->ip_address_ = std::string(ip_address);
     }
 
-    void show(const std::string& message) {
+    void show(const char* message) {
         if (!is_setup_ || !is_enabled_) return;
 
         std::lock_guard<std::mutex> lock(i2c_mutex_);
@@ -132,7 +133,7 @@ public:
         drawStatusBar();
         display_.setCursor(0, 16);
         display_.setTextSize(1);
-        display_.println(message.c_str());
+        display_.println(message);
         display_.display();
     }
 
@@ -140,9 +141,15 @@ public:
         if (!is_setup_ || !is_enabled_) return;
 
         MeasurementType m_type = measurement->getDetails().getType();
-        std::string type_name(measurement_type_translator_->translate(m_type));
+        
+        std::string_view type_name_sv = measurement_type_translator_->translate(m_type);
+        std::string type_name(type_name_sv.data(), type_name_sv.length());
+        
         std::string value = measurement->valueToString();
-        std::string unit(measurement_unit_translator_->translate(measurement->getDetails().getUnit()));
+        
+        std::string_view unit_sv = measurement_unit_translator_->translate(measurement->getDetails().getUnit());
+        std::string unit(unit_sv.data(), unit_sv.length());
+        
         const uint8_t* icon = getIconForType(m_type);
 
         std::lock_guard<std::mutex> lock(i2c_mutex_);
@@ -181,7 +188,7 @@ public:
     }
 
 
-    void showBootStep(const std::string& message, int frame) {
+    void showBootStep(const char* message, int frame) {
         if (!is_setup_ || !is_enabled_) return;
 
         std::lock_guard<std::mutex> lock(i2c_mutex_);
@@ -189,7 +196,7 @@ public:
 
         display_.setTextSize(1);
         display_.setCursor(0, 0);
-        display_.println(message.c_str());
+        display_.print(message);
 
         display_.drawBitmap(39, 14, boot_anim_data[frame % BOOT_ANIM_FRAMES], BOOT_ANIM_WIDTH, BOOT_ANIM_HEIGHT, SSD1306_WHITE);
 

@@ -59,12 +59,12 @@ public:
         serial_level_ = level;
     }
 
-    void setupSyslog(const IPAddress& host, const uint16_t port, const std::string& mac_id, const Level level) {
+    void setupSyslog(const IPAddress& host, const uint16_t port, std::string_view mac_id, const Level level) {
         syslog_enabled_ = true;
         syslog_host_ = std::string(host.toString().c_str());
         syslog_port_ = port;
         syslog_level_ = level;
-        device_id_ = mac_id;
+        device_id_ = std::string(mac_id.data(), mac_id.length());
     }
 
     // Simplified log for stability
@@ -72,7 +72,7 @@ public:
     void log(const Level level, const char* format, Args ...args) {
         if (!serial_enabled_ || level > serial_level_) return;
 
-        static const char* log_level_strings[] = { "ERROR", "WARN", "INFO", "DEBUG" };
+        static constexpr const char* log_level_strings[] = { "ERROR", "WARN", "INFO", "DEBUG" };
         const char* level_name = log_level_strings[static_cast<uint8_t>(level)];
         
         std::lock_guard<std::mutex> lock(logger_mutex_);

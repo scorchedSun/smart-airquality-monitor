@@ -1,6 +1,6 @@
 #pragma once
 
-#include <string>
+#include <string_view>
 #include <ArduinoJson.h>
 
 namespace ha {
@@ -15,15 +15,16 @@ private:
     DynamicJsonDocument device_json_;
 
 public:
-    Device(const std::string device_prefix,
-             const std::string mac_id,
-             const std::string device_name,
-             const std::string software_version)
+    Device(std::string_view device_prefix,
+             std::string_view mac_id,
+             std::string_view device_name,
+             std::string_view software_version)
         : mac_id_(mac_id)
         , device_name_(device_name)
         , software_version_(software_version)
-        , device_id_(std::string(device_prefix).append(mac_id))
-        , device_prefix_(device_prefix)
+        , device_id_(std::string(device_prefix.data(), device_prefix.length()) + std::string(mac_id.data(), mac_id.length()))
+        , device_prefix_(std::string(device_prefix.data(), device_prefix.length()))
+        , availability_topic_(std::string(device_prefix.data(), device_prefix.length()) + std::string(mac_id.data(), mac_id.length()) + "/status")
         , device_json_(512)
     {
         JsonArray identifiers(device_json_.createNestedArray("ids"));
@@ -32,19 +33,19 @@ public:
         device_json_["sw"] = software_version_;
     }
 
-    std::string getDeviceId() const {
+    std::string_view getDeviceId() const {
         return device_id_;
     }
 
-    std::string getAvailabilityTopic() const {
-        return device_prefix_ + mac_id_ + "/status";
+    std::string_view getAvailabilityTopic() const {
+        return availability_topic_;
     }
 
-    std::string getAvailabilityPayloadOnline() const {
+    constexpr std::string_view getAvailabilityPayloadOnline() const {
         return "online";
     }
 
-    std::string getAvailabilityPayloadOffline() const {
+    constexpr std::string_view getAvailabilityPayloadOffline() const {
         return "offline";
     }
 
@@ -52,9 +53,12 @@ public:
         return device_json_;
     }
     
-    std::string getMacId() const {
+    std::string_view getMacId() const {
         return mac_id_;
     }
+    
+private:
+    const std::string availability_topic_;
 };
 
 } // namespace ha

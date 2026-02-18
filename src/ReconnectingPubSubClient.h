@@ -110,23 +110,23 @@ private:
     }
 
 public:
-    ReconnectingPubSubClient(const std::string& broker,
+    ReconnectingPubSubClient(std::string_view broker,
                              uint16_t port,
-                             const std::string& mqtt_user,
-                             const std::string& mqtt_password,
-                             const std::string& client_id,
-                             const std::string& lwt_topic = "",
-                             const std::string& lwt_payload = "",
+                             std::string_view mqtt_user,
+                             std::string_view mqtt_password,
+                             std::string_view client_id,
+                             std::string_view lwt_topic = "",
+                             std::string_view lwt_payload = "",
                              bool lwt_retain = false,
                              int lwt_qos = 0)
         : pubsub_client_(wifi_client_)
-        , broker_(broker)
+        , broker_(std::string(broker.data(), broker.length()))
         , port_(port)
-        , mqtt_user_(mqtt_user)
-        , mqtt_password_(mqtt_password)
-        , client_id_(client_id)
-        , lwt_topic_(lwt_topic)
-        , lwt_payload_(lwt_payload)
+        , mqtt_user_(std::string(mqtt_user.data(), mqtt_user.length()))
+        , mqtt_password_(std::string(mqtt_password.data(), mqtt_password.length()))
+        , client_id_(std::string(client_id.data(), client_id.length()))
+        , lwt_topic_(std::string(lwt_topic.data(), lwt_topic.length()))
+        , lwt_payload_(std::string(lwt_payload.data(), lwt_payload.length()))
         , lwt_retain_(lwt_retain)
         , lwt_qos_(lwt_qos)
     {
@@ -170,10 +170,12 @@ public:
         pubsub_client_.disconnect();
     }
 
-    bool publish(const std::string& topic, const std::string& payload, bool retain = false) override {
+    bool publish(std::string_view topic, std::string_view payload, bool retain = false) override {
         std::lock_guard<std::recursive_mutex> lock(mqtt_mutex_);
         if (pubsub_client_.connected()) {
-            if (!pubsub_client_.publish(topic.c_str(), payload.c_str(), retain)) {
+            std::string t(topic); 
+            
+            if (!pubsub_client_.publish(t.c_str(), (const uint8_t*)payload.data(), payload.size(), retain)) {
                 logger.log(Logger::Level::Warning, "MQTT publish failed: %d",
                            pubsub_client_.getWriteError());
                 return false;
@@ -183,13 +185,14 @@ public:
         return false;
     }
 
-    Error publishJson(const std::string& topic, const JsonDocument& data, bool retain = false) {
+    Error publishJson(std::string_view topic, const JsonDocument& data, bool retain = false) {
         std::lock_guard<std::recursive_mutex> lock(mqtt_mutex_);
         if (pubsub_client_.connected()) {
             std::string buffer;
             serializeJson(data, buffer);
 
-            if (!pubsub_client_.publish(topic.c_str(), buffer.c_str(), retain)) {
+            std::string t(topic); 
+            if (!pubsub_client_.publish(t.c_str(), (const uint8_t*)buffer.data(), buffer.size(), retain)) {
                 logger.log(Logger::Level::Warning, "MQTT publish failed: %d",
                            pubsub_client_.getWriteError());
                 return Error::PublishFailed;

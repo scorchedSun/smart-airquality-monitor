@@ -16,8 +16,8 @@ private:
 
 public:
     Number(const Device& device,
-             const std::string& object_id,
-             const std::string& friendly_name,
+             std::string_view object_id,
+             std::string_view friendly_name,
              float min, float max, float step,
              std::function<void(float)> on_change_callback)
         : Component(device, "number", object_id, friendly_name)

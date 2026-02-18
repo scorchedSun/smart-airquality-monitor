@@ -30,15 +30,14 @@ public:
         : device_(device)
         , mqtt_client_(mqtt_client) {
         
-        mqtt_client_->setCallback([this](const char* topic, const uint8_t* payload, size_t length) {
-            if (!topic) return;
+        mqtt_client_->setCallback([this](std::string_view topic, const uint8_t* payload, size_t length) {
             std::string payload_str = (payload && length > 0) ? std::string((const char*)payload, length) : "";
             
             std::lock_guard<std::recursive_mutex> lock(manager_mutex_);
             for (auto& comp : components_) {
                 for (const auto& cmd_topic : comp->getCommandTopics()) {
                     if (cmd_topic == topic) {
-                        comp->handleCommand(topic, payload_str);
+                        comp->handleCommand(cmd_topic, payload_str);
                     }
                 }
             }
@@ -64,7 +63,7 @@ public:
             auto doc = comp->getDiscoveryPayload(*device_);
             std::string payload;
             serializeJson(doc, payload);
-            if (!mqtt_client_->publish(comp->getDiscoveryTopic(), payload, true)) {
+            if (!mqtt_client_->publish(comp->getDiscoveryTopic().c_str(), payload.c_str(), true)) {
                 all_published = false;
             }
         }
@@ -97,7 +96,7 @@ public:
         if (state_json.size() > 0 && !components_.empty()) {
             std::string payload;
             serializeJson(state_json, payload);
-            mqtt_client_->publish(components_.front()->getStateTopic(), payload);
+            mqtt_client_->publish(components_.front()->getStateTopic().c_str(), payload.c_str());
         }
     }
 };

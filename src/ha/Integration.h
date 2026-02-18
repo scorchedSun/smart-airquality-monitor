@@ -53,8 +53,8 @@ public:
         reconnected_cb_ = cb;
     }
 
-    void addSensor(MeasurementType type, const std::string& object_id, const std::string& name, 
-                   const std::string& device_class, const std::string& unit) {
+    void addSensor(MeasurementType type, std::string_view object_id, std::string_view name, 
+                   std::string_view device_class, std::string_view unit) {
         std::lock_guard<std::mutex> lock(integration_mutex_);
         if (!manager_) return;
         
@@ -126,16 +126,15 @@ public:
         if (manager_) manager_->reportState(true);
     }
     
-    void updateIpAddress(const std::string& ip) {
+    void updateIpAddress(std::string_view ip) {
         std::lock_guard<std::mutex> lock(integration_mutex_);
         if (ip_sensor_) {
-            ip_sensor_->updateState(ip.c_str());
+            ip_sensor_->updateState(ip);
             if (manager_) manager_->reportState(true);
         }
     }
 
-    std::string getDeviceId() const {
-        std::lock_guard<std::mutex> lock(integration_mutex_);
+    std::string_view getDeviceId() const {
         return device_ ? device_->getDeviceId() : "";
     }
 

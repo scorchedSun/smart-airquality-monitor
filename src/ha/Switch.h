@@ -14,8 +14,8 @@ private:
 
 public:
     Switch(const Device& device,
-             const std::string& object_id,
-             const std::string& friendly_name,
+             std::string_view object_id,
+             std::string_view friendly_name,
              std::function<void(bool)> on_toggle_callback)
         : Component(device, "switch", object_id, friendly_name)
         , command_topic_(base_topic_ + "/set")

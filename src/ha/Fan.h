@@ -16,8 +16,8 @@ private:
 
 public:
     Fan(const Device& device,
-             const std::string& object_id,
-             const std::string& friendly_name,
+             std::string_view object_id,
+             std::string_view friendly_name,
              std::function<void(bool)> on_off_cb,
              std::function<void(uint8_t)> speed_cb)
         : Component(device, "fan", object_id, friendly_name)
@@ -54,7 +54,7 @@ public:
         return topics;
     }
     
-    std::string getPercentageCommandTopic() const {
+    std::string_view getPercentageCommandTopic() const {
         return percentage_command_topic_;
     }
 

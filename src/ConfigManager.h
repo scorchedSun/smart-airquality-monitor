@@ -2,6 +2,7 @@
 
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <Preferences.h>
 #include <Esp.h>
 #include "ConfigKeys.h"
@@ -83,9 +84,11 @@ public:
     std::string getHostName() {
         std::string name = getString(cfg::keys::host_name, cfg::defaults::host_name);
         if (name.empty()) name = cfg::defaults::host_name;
-        std::string suffix = mac_id_cache_.size() >= 4
-            ? mac_id_cache_.substr(mac_id_cache_.size() - 4)
-            : "0000";
+        
+        std::string suffix = "0000";
+        if (mac_id_cache_.size() >= 4) {
+             suffix = mac_id_cache_.substr(mac_id_cache_.size() - 4);
+        }
         return name + "-" + suffix;
     }
 };

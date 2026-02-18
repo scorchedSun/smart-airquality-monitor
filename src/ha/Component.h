@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <ArduinoJson.h>
 #include <vector>
 #include "Device.h"
@@ -19,17 +20,17 @@ protected:
 
 public:
     Component(const Device& device,
-                const std::string& component_type,
-                const std::string& object_id,
-                const std::string& friendly_name,
-                const std::string& discovery_prefix = "homeassistant")
-        : component_type_(component_type)
-        , object_id_(object_id)
-        , friendly_name_(friendly_name)
-        , unique_id_(object_id + "_" + device.getMacId())
-        , discovery_prefix_(discovery_prefix)
-        , device_id_(device.getDeviceId())
-        , base_topic_(discovery_prefix + "/" + component_type + "/" + device_id_ + "/" + object_id)
+                std::string_view component_type,
+                std::string_view object_id,
+                std::string_view friendly_name,
+                std::string_view discovery_prefix = "homeassistant")
+        : component_type_(std::string(component_type.data(), component_type.length()))
+        , object_id_(std::string(object_id.data(), object_id.length()))
+        , friendly_name_(std::string(friendly_name.data(), friendly_name.length()))
+        , unique_id_(std::string(object_id.data(), object_id.length()) + "_" + std::string(device.getMacId().data(), device.getMacId().length()))
+        , discovery_prefix_(std::string(discovery_prefix.data(), discovery_prefix.length()))
+        , device_id_(std::string(device.getDeviceId().data(), device.getDeviceId().length()))
+        , base_topic_(std::string(discovery_prefix.data(), discovery_prefix.length()) + "/" + std::string(component_type.data(), component_type.length()) + "/" + device_id_ + "/" + std::string(object_id.data(), object_id.length()))
     {
     }
 
@@ -53,14 +54,16 @@ public:
         doc["name"] = friendly_name_;
         doc["uniq_id"] = unique_id_;
         doc["stat_t"] = getStateTopic();
-        doc["avty_t"] = device.getAvailabilityTopic();
-        doc["pl_avail"] = device.getAvailabilityPayloadOnline();
-        doc["pl_not_avail"] = device.getAvailabilityPayloadOffline();
+        doc["avty_t"] = std::string(device.getAvailabilityTopic().data(), device.getAvailabilityTopic().length());
+        std::string_view on = device.getAvailabilityPayloadOnline();
+        doc["pl_avail"] = std::string(on.data(), on.length());
+        std::string_view off = device.getAvailabilityPayloadOffline();
+        doc["pl_not_avail"] = std::string(off.data(), off.length());
         return doc;
     }
 
-    std::string getObjectId() const { return object_id_; }
-    std::string getComponentType() const { return component_type_; }
+    std::string_view getObjectId() const { return object_id_; }
+    std::string_view getComponentType() const { return component_type_; }
 
     virtual void handleCommand(const std::string& topic, const std::string& payload) {}
 

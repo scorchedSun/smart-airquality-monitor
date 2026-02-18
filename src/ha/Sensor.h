@@ -22,17 +22,17 @@ public:
              std::string_view discovery_prefix = "homeassistant",
              std::string_view category = "",
              std::string_view icon_name = "")
-        : Component(device, "sensor", std::string(object_id), std::string(friendly_name), std::string(discovery_prefix))
-        , device_class_(device_class_name)
-        , unit_of_measurement_(unit)
-        , value_template_(std::string("{{ value_json.").append(std::string(object_id)).append(" }}"))
-        , entity_category_(category)
-        , icon_(icon_name)
+        : Component(device, "sensor", object_id, friendly_name, discovery_prefix)
+        , device_class_(std::string(device_class_name.data(), device_class_name.length()))
+        , unit_of_measurement_(std::string(unit.data(), unit.length()))
+        , value_template_(std::string("{{ value_json.").append(std::string(object_id.data(), object_id.length())).append(" }}"))
+        , entity_category_(std::string(category.data(), category.length()))
+        , icon_(std::string(icon_name.data(), icon_name.length()))
     {
     }
 
-    void updateState(const std::string& state) {
-        manual_state_ = state;
+    void updateState(std::string_view state) {
+        manual_state_ = std::string(state.data(), state.length());
     }
 
     std::string getStatePayload() const override {

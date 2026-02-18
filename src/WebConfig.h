@@ -318,7 +318,7 @@ public:
                 auto& cm = ConfigManager::getInstance();
 
                 auto putStr = [&](const char* key) {
-                    if (doc.containsKey(key)) cm.putString(key, doc[key].as<std::string>());
+                    if (doc.containsKey(key)) cm.putString(key, doc[key].as<std::string>().c_str());
                 };
                 auto putIntFromStr = [&](const char* key) {
                     if (doc.containsKey(key)) {
