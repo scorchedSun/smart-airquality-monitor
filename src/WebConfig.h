@@ -13,10 +13,13 @@
 class WebConfig {
 public:
     using ConfigChangeCallback = std::function<void()>;
+    using OtaCallback = std::function<void()>;
 
 private:
     AsyncWebServer server_;
     ConfigChangeCallback on_config_changed_;
+    OtaCallback on_ota_start_;
+    OtaCallback on_ota_end_;
     bool ap_mode_ = false;
     size_t update_content_len_ = 0;
 
@@ -269,6 +272,9 @@ function doUpload(){
 public:
     WebConfig(uint16_t port = 80) : server_(port) {}
 
+    void setOnOtaStart(OtaCallback cb) { on_ota_start_ = cb; }
+    void setOnOtaEnd(OtaCallback cb) { on_ota_end_ = cb; }
+
     void begin(ConfigChangeCallback callback = nullptr) {
         on_config_changed_ = callback;
 
@@ -363,15 +369,20 @@ public:
                 bool success = !Update.hasError();
                 request->send(success ? 200 : 500, "text/plain",
                               success ? "Update OK. Rebooting..." : "Update failed.");
+                
                 if (success) {
                     should_reboot = true;
                     reboot_timer = millis();
                 }
+
+                if (on_ota_end_) on_ota_end_();
             },
             // File upload handler (called per chunk)
             [this](AsyncWebServerRequest* request, const String& filename,
                    size_t index, uint8_t* data, size_t len, bool final) {
                 if (index == 0) {
+                    if (on_ota_start_) on_ota_start_();
+
                     update_content_len_ = request->contentLength();
                     logger.log(Logger::Level::Info, "Web OTA start: %s, size: %u",
                                filename.c_str(), (uint32_t)update_content_len_);

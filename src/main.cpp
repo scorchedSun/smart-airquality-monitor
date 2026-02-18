@@ -196,7 +196,7 @@ void setupHa() {
 //  MQTT
 // ═══════════════════════════════════════════════════════════════
 
-void setupMqtt(const std::string& mqtt_device_id) {
+void setupMqtt(const std::string& mqtt_device_id, const std::string& lwt_topic, const std::string& lwt_payload) {
     auto& cm = ConfigManager::getInstance();
     std::string broker = cm.getString(cfg::keys::mqtt_broker, cfg::defaults::mqtt_broker);
     uint16_t port = cm.getInt(cfg::keys::mqtt_port, cfg::defaults::mqtt_port);
@@ -212,7 +212,8 @@ void setupMqtt(const std::string& mqtt_device_id) {
     }
 
     reconnecting_mqtt_client = std::make_shared<ReconnectingPubSubClient>(
-        broker, port, user, password, mqtt_device_id);
+        broker, port, user, password, mqtt_device_id,
+        lwt_topic, lwt_payload, true, 0);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -276,12 +277,12 @@ void sensorTask(void* parameter) {
 //  OTA
 // ═══════════════════════════════════════════════════════════════
 
-void startOtaSafeMode() {
+void startOtaSafeMode(bool stop_web) {
     if (ota_in_progress.load()) return;
     ota_in_progress.store(true);
     esp_task_wdt_delete(NULL);  // Remove loop task from WDT
     WiFi.setSleep(false);
-    web_config.stop();
+    if (stop_web) web_config.stop();
     delay(100);
     if (fan) fan->turnOff();
     if (sensor_task_handle && eTaskGetState(sensor_task_handle) != eSuspended) {
@@ -290,11 +291,11 @@ void startOtaSafeMode() {
     display.show("Updating...");
 }
 
-void stopOtaSafeMode() {
+void stopOtaSafeMode(bool restart_web) {
     if (!ota_in_progress.load()) return;
     ota_in_progress.store(false);
     WiFi.setSleep(true);
-    web_config.restart();
+    if (restart_web) web_config.restart();
     esp_task_wdt_add(NULL);  // Re-add loop task to WDT
     if (sensor_task_handle && eTaskGetState(sensor_task_handle) == eSuspended) {
         vTaskResume(sensor_task_handle);
@@ -305,12 +306,12 @@ void setupOta() {
     ArduinoOTA.setHostname(ConfigManager::getInstance().getHostName().c_str());
 
     ArduinoOTA.onStart([]() {
-        startOtaSafeMode();
+        startOtaSafeMode(true);
     });
 
     ArduinoOTA.onEnd([]() {
         display.show("OTA Done!");
-        stopOtaSafeMode();
+        stopOtaSafeMode(true);
     });
 
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
@@ -323,7 +324,7 @@ void setupOta() {
 
     ArduinoOTA.onError([](ota_error_t error) {
         display.show("OTA Error!");
-        stopOtaSafeMode();
+        stopOtaSafeMode(true);
     });
 
     ArduinoOTA.begin();
@@ -373,6 +374,15 @@ void setup() {
     boot_msg.store("Connecting WiFi...");
     bool wifi_connected = connectWifi();
 
+    web_config.setOnOtaStart([]() {
+        startOtaSafeMode(false);
+    });
+
+    web_config.setOnOtaEnd([]() {
+        stopOtaSafeMode(false);
+        display.show("Update Done!");
+    });
+
     web_config.begin([]() {
         logger.log(Logger::Level::Info, "Config changed, rebooting...");
         delay(500);
@@ -411,9 +421,11 @@ void setup() {
 
     std::string friendly_name = cm.getString(cfg::keys::friendly_name, cfg::defaults::friendly_name);
     
-    setupMqtt(mac_id); 
+    auto device = std::make_shared<ha::Device>(device_prefix, mac_id, friendly_name, app_version);
 
-    ha_integration = std::make_unique<ha::Integration>(device_prefix, mac_id, friendly_name, app_version, reconnecting_mqtt_client);
+    setupMqtt(mac_id, device->getAvailabilityTopic(), device->getAvailabilityPayloadOffline()); 
+
+    ha_integration = std::make_unique<ha::Integration>(device, reconnecting_mqtt_client);
     
     setupHa();
 

@@ -53,6 +53,9 @@ public:
         doc["name"] = friendly_name_;
         doc["uniq_id"] = unique_id_;
         doc["stat_t"] = getStateTopic();
+        doc["avty_t"] = device.getAvailabilityTopic();
+        doc["pl_avail"] = device.getAvailabilityPayloadOnline();
+        doc["pl_not_avail"] = device.getAvailabilityPayloadOffline();
         return doc;
     }
 

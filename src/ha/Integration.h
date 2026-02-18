@@ -26,11 +26,9 @@ public:
     using ConfigSaveCallback = std::function<void(const std::string& key, int value)>;
     using ReconnectedCallback = std::function<void()>;
 
-    Integration(const std::string& device_prefix, const std::string& mac_id, 
-                  const std::string& friendly_name, const std::string& app_version,
+    Integration(std::shared_ptr<ha::Device> device,
                   std::shared_ptr<ha::MqttClient> mqtt_client)
-        : mqtt_client_(mqtt_client) {
-        device_ = std::make_shared<ha::Device>(device_prefix, mac_id, friendly_name, app_version);
+        : mqtt_client_(mqtt_client), device_(device) {
         manager_ = std::make_shared<ha::Manager>(device_, mqtt_client);
     }
 
@@ -95,6 +93,10 @@ public:
                     lock.unlock();
                     reconnected_cb_();
                     lock.lock();
+                }
+                // Publish online status
+                if (device_) {
+                    mqtt_client_->publish(device_->getAvailabilityTopic(), device_->getAvailabilityPayloadOnline(), true);
                 }
             }
             

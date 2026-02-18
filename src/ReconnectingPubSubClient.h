@@ -30,6 +30,11 @@ private:
     const std::string mqtt_password_;
     const std::string client_id_;
 
+    const std::string lwt_topic_;
+    const std::string lwt_payload_;
+    const bool lwt_retain_;
+    const int lwt_qos_;
+
     uint32_t last_connection_attempt_timestamp_ = 0;
     uint32_t current_backoff_ms_ = 1000;
 
@@ -74,7 +79,15 @@ private:
         logger.log(Logger::Level::Info, "Attempting MQTT connection to %s:%d as %s", 
                    broker_.c_str(), port_, client_id_.c_str());
 
-        if (!pubsub_client_.connect(client_id_.c_str(), user_ptr, pass_ptr)) {
+        bool connected = false;
+        if (!lwt_topic_.empty()) {
+            connected = pubsub_client_.connect(client_id_.c_str(), user_ptr, pass_ptr, 
+                                             lwt_topic_.c_str(), lwt_qos_, lwt_retain_, lwt_payload_.c_str());
+        } else {
+            connected = pubsub_client_.connect(client_id_.c_str(), user_ptr, pass_ptr);
+        }
+
+        if (!connected) {
             int state = pubsub_client_.state();
             logger.log(Logger::Level::Warning, "MQTT connect failed (state %d), retry in %ums",
                        state, current_backoff_ms_);
@@ -101,13 +114,21 @@ public:
                              uint16_t port,
                              const std::string& mqtt_user,
                              const std::string& mqtt_password,
-                             const std::string& client_id)
+                             const std::string& client_id,
+                             const std::string& lwt_topic = "",
+                             const std::string& lwt_payload = "",
+                             bool lwt_retain = false,
+                             int lwt_qos = 0)
         : pubsub_client_(wifi_client_)
         , broker_(broker)
         , port_(port)
         , mqtt_user_(mqtt_user)
         , mqtt_password_(mqtt_password)
         , client_id_(client_id)
+        , lwt_topic_(lwt_topic)
+        , lwt_payload_(lwt_payload)
+        , lwt_retain_(lwt_retain)
+        , lwt_qos_(lwt_qos)
     {
         pubsub_client_.setBufferSize(2048);
     }

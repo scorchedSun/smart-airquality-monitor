@@ -36,6 +36,18 @@ public:
         return device_id_;
     }
 
+    std::string getAvailabilityTopic() const {
+        return device_prefix_ + mac_id_ + "/status";
+    }
+
+    std::string getAvailabilityPayloadOnline() const {
+        return "online";
+    }
+
+    std::string getAvailabilityPayloadOffline() const {
+        return "offline";
+    }
+
     const DynamicJsonDocument& getDeviceInfoJson() const {
         return device_json_;
     }
