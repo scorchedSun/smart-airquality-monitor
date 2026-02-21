@@ -5,7 +5,7 @@
 #include "Sensor.h"
 #include "Logger.h"
 
-class PMWrapper : public Sensor {
+class PMWrapper : public SensorDriver {
 
 private:
     const MeasurementDetails pm1_details = MeasurementDetails(MeasurementType::PM1, MeasurementUnit::MicroGramPerCubicMeter);
@@ -29,6 +29,7 @@ public:
         bool success(false);
 
         sensor.wake();
+        delay(30000); // PMS5003 needs ~30s to stabilize after wake
         sensor.read();
 
         if (sensor) {

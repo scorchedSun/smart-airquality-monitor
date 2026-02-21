@@ -22,10 +22,12 @@ private:
     OtaCallback on_ota_end_;
     bool ap_mode_ = false;
     size_t update_content_len_ = 0;
+    bool should_reboot_ = false;
+    uint32_t reboot_timer_ = 0;
 
     static const char* getConfigPage() {
         // ... (HTML content unchanged, omitted for brevity if tool supported it, but must include full content here)
-        static const char page[] PROGMEM = R"rawhtml(
+        static const char page[] = R"rawhtml(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -183,7 +185,7 @@ startPoll();
     }
 
     static const char* getUpdatePage() {
-        static const char page[] PROGMEM = R"rawhtml(
+        static const char page[] = R"rawhtml(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -320,31 +322,37 @@ public:
                 auto putStr = [&](const char* key) {
                     if (doc.containsKey(key)) cm.putString(key, doc[key].as<std::string>().c_str());
                 };
-                auto putIntFromStr = [&](const char* key) {
+                auto putIntFromStr = [&](const char* key, int32_t min_val = INT32_MIN, int32_t max_val = INT32_MAX) {
                     if (doc.containsKey(key)) {
                         std::string val = doc[key].as<std::string>();
-                        cm.putInt(key, atoi(val.c_str()));
+                        char* end = nullptr;
+                        long parsed = std::strtol(val.c_str(), &end, 10);
+                        if (end != val.c_str()) {
+                            if (parsed < min_val) parsed = min_val;
+                            if (parsed > max_val) parsed = max_val;
+                            cm.putInt(key, static_cast<int32_t>(parsed));
+                        }
                     }
                 };
 
                 putStr(cfg::keys::wifi_ssid);
                 putStr(cfg::keys::wifi_pass);
                 putStr(cfg::keys::mqtt_broker);
-                putIntFromStr(cfg::keys::mqtt_port);
+                putIntFromStr(cfg::keys::mqtt_port, 1, 65535);
                 putStr(cfg::keys::mqtt_user);
                 putStr(cfg::keys::mqtt_pass);
                 putStr(cfg::keys::friendly_name);
                 putStr(cfg::keys::host_name);
                 putStr(cfg::keys::syslog_server_ip);
-                putIntFromStr(cfg::keys::syslog_server_port);
+                putIntFromStr(cfg::keys::syslog_server_port, 1, 65535);
 
                 if (doc.containsKey(cfg::keys::enable_display)) {
                     std::string val = doc[cfg::keys::enable_display].as<std::string>();
                     cm.putBool(cfg::keys::enable_display, val == "1" || val == "true");
                 }
-                putIntFromStr(cfg::keys::display_interval);
-                putIntFromStr(cfg::keys::report_interval);
-                putIntFromStr(cfg::keys::fan_speed);
+                putIntFromStr(cfg::keys::display_interval, 5, 15);
+                putIntFromStr(cfg::keys::report_interval, 1, 15);
+                putIntFromStr(cfg::keys::fan_speed, 0, 100);
 
                 request->send(200, "application/json", "{\"ok\":true}");
 
@@ -371,8 +379,8 @@ public:
                               success ? "Update OK. Rebooting..." : "Update failed.");
                 
                 if (success) {
-                    should_reboot = true;
-                    reboot_timer = millis();
+                    should_reboot_ = true;
+                    reboot_timer_ = millis();
                 }
 
                 if (on_ota_end_) on_ota_end_();
@@ -425,15 +433,14 @@ public:
         server_.end();
     }
 
-    bool should_reboot = false;
-    uint32_t reboot_timer = 0;
+
 
     void restart() {
         server_.begin();
     }
 
     void loop() {
-        if (should_reboot && millis() - reboot_timer > 2000) {
+        if (should_reboot_ && millis() - reboot_timer_ > 2000) {
             ESP.restart();
         }
     }

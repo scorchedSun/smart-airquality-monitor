@@ -29,8 +29,8 @@ public:
     {
     }
 
-    DynamicJsonDocument getDiscoveryPayload(const Device& device) const override {
-        DynamicJsonDocument doc = Component::getDiscoveryPayload(device);
+    StaticJsonDocument<1024> getDiscoveryPayload(const Device& device) const override {
+        StaticJsonDocument<1024> doc = Component::getDiscoveryPayload(device);
         doc["cmd_t"] = command_topic_;
         doc["min"] = min_val_;
         doc["max"] = max_val_;
@@ -57,7 +57,9 @@ public:
 
     void handleCommand(const std::string& topic, const std::string& payload) override {
         if (payload.empty()) return;
-        float new_val = atof(payload.c_str());
+        char* end = nullptr;
+        float new_val = std::strtof(payload.c_str(), &end);
+        if (end == payload.c_str()) return; // Parse failed
         current_value_ = new_val;
         if (callback_) {
             callback_(new_val);

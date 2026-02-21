@@ -23,8 +23,8 @@ public:
     {
     }
 
-    DynamicJsonDocument getDiscoveryPayload(const Device& device) const override {
-        DynamicJsonDocument doc = Component::getDiscoveryPayload(device);
+    StaticJsonDocument<1024> getDiscoveryPayload(const Device& device) const override {
+        StaticJsonDocument<1024> doc = Component::getDiscoveryPayload(device);
         doc["cmd_t"] = command_topic_;
         doc["payload_on"] = "ON";
         doc["payload_off"] = "OFF";

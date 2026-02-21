@@ -6,7 +6,7 @@
 #include "ArduinoJson.h"
 
 enum class MeasurementType { Temperature, Humidity, PM1, PM25, PM10, CO2 };
-enum class MeasurementUnit { DegreesCelcius, Percent, PPM, MicroGramPerCubicMeter };
+enum class MeasurementUnit { DegreesCelsius, Percent, PPM, MicroGramPerCubicMeter };
 
 class MeasurementDetails {
     private:
@@ -14,7 +14,7 @@ class MeasurementDetails {
         const MeasurementUnit unit_;
     
     public:
-        MeasurementDetails(const MeasurementType type, const MeasurementUnit unit) 
+        MeasurementDetails(MeasurementType type, MeasurementUnit unit) 
             : type_(type)
             , unit_(unit) {
         }
@@ -31,28 +31,23 @@ class MeasurementDetails {
 class Measurement {
     private:
         const MeasurementDetails details_;
+        const std::string formatted_value_;
 
     protected:
-        Measurement(const MeasurementDetails details) 
-            : details_(details) {
+        Measurement(MeasurementDetails details, std::string formatted_value) 
+            : details_(details)
+            , formatted_value_(std::move(formatted_value)) {
         }
 
-    private:
-        mutable std::string cached_value_;
-
-    protected:
-        virtual std::string formatValue() const = 0;
-
     public:
+        virtual ~Measurement() = default;
+
         MeasurementDetails getDetails() const {
             return details_;
         }
 
         const std::string& valueToString() const {
-            if (cached_value_.empty()) {
-                cached_value_ = formatValue();
-            }
-            return cached_value_;
+            return formatted_value_;
         }
 };
 
@@ -62,18 +57,14 @@ class DecimalMeasurement : public Measurement
         const double value_;
 
     public:
-        DecimalMeasurement(const MeasurementDetails details, const double value)
-            : Measurement(details)
+        DecimalMeasurement(MeasurementDetails details, double value)
+            : Measurement(details, std::format("{:.2f}", value))
             , value_(value) 
         {                
         }
 
         double getValue() const {
             return value_;
-        }
-
-        std::string formatValue() const override {
-            return std::format("{:.2f}", value_);
         }
 };
 
@@ -83,17 +74,13 @@ class RoundNumberMeasurement : public Measurement
         const uint32_t value_;
 
     public:
-        RoundNumberMeasurement(const MeasurementDetails details, const uint32_t value) 
-            : Measurement(details)
+        RoundNumberMeasurement(MeasurementDetails details, uint32_t value) 
+            : Measurement(details, std::to_string(value))
             , value_(value)
         {            
         }
 
         uint32_t getValue() const {
             return value_;
-        }
-
-        std::string formatValue() const override {
-            return std::to_string(value_);
         }
 };

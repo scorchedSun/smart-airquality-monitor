@@ -9,6 +9,8 @@ class Fan : public Component {
 private:
     const std::string command_topic_;
     const std::string percentage_command_topic_;
+    const std::string state_key_;
+    const std::string speed_key_;
     std::function<void(bool)> on_off_callback_;
     std::function<void(uint8_t)> speed_callback_;
     bool current_state_ = false;
@@ -23,20 +25,22 @@ public:
         : Component(device, "fan", object_id, friendly_name)
         , command_topic_(base_topic_ + "/set")
         , percentage_command_topic_(base_topic_ + "/speed/set")
+        , state_key_(std::string{object_id} + "_state")
+        , speed_key_(std::string{object_id} + "_speed")
         , on_off_callback_(on_off_cb)
         , speed_callback_(speed_cb)
     {
     }
 
-    DynamicJsonDocument getDiscoveryPayload(const Device& device) const override {
-        DynamicJsonDocument doc = Component::getDiscoveryPayload(device);
+    StaticJsonDocument<1024> getDiscoveryPayload(const Device& device) const override {
+        StaticJsonDocument<1024> doc = Component::getDiscoveryPayload(device);
         doc["cmd_t"] = command_topic_;
         doc["pct_cmd_t"] = percentage_command_topic_;
         doc["payload_on"] = "ON";
         doc["payload_off"] = "OFF";
         doc["pct_stat_t"] = getStateTopic();
-        doc["stat_val_tpl"] = std::string("{{ value_json.").append(object_id_).append("_state }}");
-        doc["pct_val_tpl"] = std::string("{{ value_json.").append(object_id_).append("_speed }}");
+        doc["stat_val_tpl"] = "{{ value_json." + state_key_ + " }}";
+        doc["pct_val_tpl"] = "{{ value_json." + speed_key_ + " }}";
         doc["spd_rng_min"] = 1;
         doc["spd_rng_max"] = 100;
         return doc;
@@ -65,11 +69,13 @@ public:
             if (on_off_callback_) on_off_callback_(new_state);
         } else if (topic == percentage_command_topic_) {
             if (payload.empty()) return;
-            int speed = atoi(payload.c_str());
+            char* end = nullptr;
+            long speed = std::strtol(payload.c_str(), &end, 10);
+            if (end == payload.c_str()) return; // Parse failed
             if (speed < 0) speed = 0;
             if (speed > 100) speed = 100;
-            updateSpeed((uint8_t)speed);
-            if (speed_callback_) speed_callback_((uint8_t)speed);
+            updateSpeed(static_cast<uint8_t>(speed));
+            if (speed_callback_) speed_callback_(static_cast<uint8_t>(speed));
         }
     }
 
@@ -85,8 +91,8 @@ public:
     }
 
     void populateState(JsonObject& doc) const override {
-        doc[object_id_ + "_state"] = current_state_ ? "ON" : "OFF";
-        doc[object_id_ + "_speed"] = current_speed_;
+        doc[state_key_] = current_state_ ? "ON" : "OFF";
+        doc[speed_key_] = current_speed_;
     }
 };
 

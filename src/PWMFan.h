@@ -32,7 +32,7 @@ public:
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .channel = LEDC_CHANNEL_0,
             .timer_sel = LEDC_TIMER_0,
-            .duty = (uint32_t)(max_duty * (std::min(initial_speed_percent, (uint8_t)100) / 100.0)),
+            .duty = (max_duty * std::min<uint8_t>(initial_speed_percent, 100)) / 100,
             .hpoint = 0
         };
 
@@ -45,7 +45,7 @@ public:
             percent = 100;
         }
 
-        ledc_set_duty(channel_config_.speed_mode, channel_config_.channel, max_duty * (percent / 100.0));
+        ledc_set_duty(channel_config_.speed_mode, channel_config_.channel, (max_duty * percent) / 100);
         ledc_update_duty(channel_config_.speed_mode, channel_config_.channel);
     }
 

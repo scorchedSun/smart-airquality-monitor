@@ -6,11 +6,11 @@
 #include "Logger.h"
 #include <mutex>
 
-class DHT20Wrapper : public Sensor {
+class DHT20Wrapper : public SensorDriver {
 
 private:
     DHT20 sensor;
-    const MeasurementDetails temperature_sensor_details = MeasurementDetails(MeasurementType::Temperature, MeasurementUnit::DegreesCelcius);
+    const MeasurementDetails temperature_sensor_details = MeasurementDetails(MeasurementType::Temperature, MeasurementUnit::DegreesCelsius);
     const MeasurementDetails humidity_sensor_details = MeasurementDetails(MeasurementType::Humidity, MeasurementUnit::Percent);
     std::mutex& i2c_mutex;
 

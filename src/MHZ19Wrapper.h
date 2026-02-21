@@ -6,7 +6,7 @@
 #include "Sensor.h"
 #include "Logger.h"
 
-class MHZ19Wrapper : public Sensor {
+class MHZ19Wrapper : public SensorDriver {
 
 private:
     const MeasurementDetails sensor_details = MeasurementDetails(MeasurementType::CO2, MeasurementUnit::PPM);

@@ -9,7 +9,6 @@
 #include <SPI.h>
 
 #include "Translator.h"
-#include "Translator.h"
 #include "Icons.h"
 
 class Display {
@@ -77,7 +76,7 @@ public:
             if (!display_.begin(SSD1306_SWITCHCAPVCC))
             {
                 Serial.println("Display could not be set up.");
-                for (;;);
+                return;
             }
     
             is_setup_ = true;
@@ -91,7 +90,7 @@ public:
     }
 
     void setEnabled(bool enabled) {
-        this->is_enabled_ = enabled;
+        is_enabled_ = enabled;
 
         if (enabled) {
             turnOn();
@@ -117,12 +116,12 @@ public:
     }
 
     void setConnectivity(bool wifi, bool mqtt) {
-        this->wifi_connected_ = wifi;
-        this->mqtt_connected_ = mqtt;
+        wifi_connected_ = wifi;
+        mqtt_connected_ = mqtt;
     }
 
     void setIpAddress(const char* ip_address) {
-        this->ip_address_ = std::string(ip_address);
+        ip_address_ = std::string(ip_address);
     }
 
     void show(const char* message) {

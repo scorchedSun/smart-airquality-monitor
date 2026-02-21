@@ -27,12 +27,14 @@ public:
     }
 
     void begin() {
+        std::lock_guard<std::mutex> lock(mutex_);
         if (initialized_) return;
         prefs_.begin(namespace_name, false);
         initialized_ = true;
     }
 
     void buildMacId() {
+        std::lock_guard<std::mutex> lock(mutex_);
         uint64_t mac = ESP.getEfuseMac();
         char buf[13];
         uint8_t mac_bytes[6];

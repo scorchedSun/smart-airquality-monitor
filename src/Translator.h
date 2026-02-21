@@ -12,7 +12,7 @@ class DisplayUnitTranslator : public Translator<MeasurementUnit> {
 public:
     std::string_view translate(const MeasurementUnit& unit) const override {
         switch (unit) {
-            case MeasurementUnit::DegreesCelcius: return "\xF7" "C";
+            case MeasurementUnit::DegreesCelsius: return "\xF7" "C";
             case MeasurementUnit::Percent: return "%";
             case MeasurementUnit::PPM: return "ppm";
             case MeasurementUnit::MicroGramPerCubicMeter: return "ug/m3";

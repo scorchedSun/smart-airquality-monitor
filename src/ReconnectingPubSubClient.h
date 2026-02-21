@@ -120,13 +120,13 @@ public:
                              bool lwt_retain = false,
                              int lwt_qos = 0)
         : pubsub_client_(wifi_client_)
-        , broker_(std::string(broker.data(), broker.length()))
+        , broker_{broker}
         , port_(port)
-        , mqtt_user_(std::string(mqtt_user.data(), mqtt_user.length()))
-        , mqtt_password_(std::string(mqtt_password.data(), mqtt_password.length()))
-        , client_id_(std::string(client_id.data(), client_id.length()))
-        , lwt_topic_(std::string(lwt_topic.data(), lwt_topic.length()))
-        , lwt_payload_(std::string(lwt_payload.data(), lwt_payload.length()))
+        , mqtt_user_{mqtt_user}
+        , mqtt_password_{mqtt_password}
+        , client_id_{client_id}
+        , lwt_topic_{lwt_topic}
+        , lwt_payload_{lwt_payload}
         , lwt_retain_(lwt_retain)
         , lwt_qos_(lwt_qos)
     {

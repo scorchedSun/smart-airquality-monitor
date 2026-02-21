@@ -22,9 +22,9 @@ public:
         : mac_id_(mac_id)
         , device_name_(device_name)
         , software_version_(software_version)
-        , device_id_(std::string(device_prefix.data(), device_prefix.length()) + std::string(mac_id.data(), mac_id.length()))
-        , device_prefix_(std::string(device_prefix.data(), device_prefix.length()))
-        , availability_topic_(std::string(device_prefix.data(), device_prefix.length()) + std::string(mac_id.data(), mac_id.length()) + "/status")
+        , device_id_(std::string{device_prefix} + std::string{mac_id})
+        , device_prefix_{device_prefix}
+        , availability_topic_(std::string{device_prefix} + std::string{mac_id} + "/status")
         , device_json_(512)
     {
         JsonArray identifiers(device_json_.createNestedArray("ids"));

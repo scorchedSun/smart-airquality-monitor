@@ -21,6 +21,7 @@ namespace keys {
     constexpr const char* syslog_server_ip  = "syslog_ip";
     constexpr const char* syslog_server_port = "syslog_port";
     constexpr const char* log_level         = "log_level";
+    constexpr const char* ha_discovery_prefix = "ha_prefix";
 }
 
 namespace defaults {
@@ -39,6 +40,7 @@ namespace defaults {
     constexpr const char* syslog_server_ip  = "";
     constexpr uint16_t    syslog_server_port = 514;
     constexpr const char* log_level         = "Error";
+    constexpr const char* ha_discovery_prefix = "homeassistant";
 }
 
 }

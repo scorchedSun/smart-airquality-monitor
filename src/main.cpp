@@ -32,7 +32,6 @@
 #include "PWMFan.h"
 #include "ReconnectingPubSubClient.h"
 #include "Translator.h"
-#include "ha/Integration.h"
 #include <ArduinoOTA.h>
 #include <Update.h>
 
@@ -62,7 +61,7 @@ std::shared_ptr<ReconnectingPubSubClient> reconnecting_mqtt_client;
 std::unique_ptr<ha::Integration> ha_integration;
 
 // ── Sensors / Measurements ─────────────────────────────────────
-std::vector<std::unique_ptr<Sensor>> sensors;
+std::vector<std::unique_ptr<SensorDriver>> sensors;
 std::vector<std::unique_ptr<Measurement>> measurements;
 std::mutex measurements_mutex;
 
@@ -128,6 +127,7 @@ bool connectWifi() {
     if (ssid.empty()) return false;
 
     WiFi.setHostname(cm.getHostName().c_str());
+    WiFi.setAutoReconnect(true);
     WiFi.begin(ssid.c_str(), pass.c_str());
 
     uint32_t start = millis();
@@ -355,16 +355,17 @@ void bootAnimTask(void* parameter) {
 void setup() {
     Wire.begin();
     Serial.begin(115200);
-    if (ConfigManager::getInstance().getBool(cfg::keys::enable_display, cfg::defaults::enable_display)) {
-        display.setup();
-        display.showBootStep("Initializing...", 0);
-    }
 
     auto& cm = ConfigManager::getInstance();
     cm.begin();
 
     WiFi.mode(WIFI_STA);
     cm.buildMacId();
+
+    if (cm.getBool(cfg::keys::enable_display, cfg::defaults::enable_display)) {
+        display.setup();
+        display.showBootStep("Initializing...", 0);
+    }
 
     boot_anim_active.store(true);
     xTaskCreatePinnedToCore(bootAnimTask, "BootAnim", 2048, NULL, 1, NULL, 0);
@@ -422,11 +423,13 @@ void setup() {
 
     std::string friendly_name = cm.getString(cfg::keys::friendly_name, cfg::defaults::friendly_name);
     
+    std::string discovery_prefix = cm.getString(cfg::keys::ha_discovery_prefix, cfg::defaults::ha_discovery_prefix);
+
     auto device = std::make_shared<ha::Device>(device_prefix, mac_id.c_str(), friendly_name.c_str(), app_version);
 
     setupMqtt(mac_id.c_str(), device->getAvailabilityTopic(), device->getAvailabilityPayloadOffline()); 
     
-    ha_integration = std::make_unique<ha::Integration>(device, reconnecting_mqtt_client);
+    ha_integration = std::make_unique<ha::Integration>(device, reconnecting_mqtt_client, discovery_prefix);
     
     setupHa();
 

@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <map>
+#include <array>
 #include <mutex>
 #include "MqttClient.h"
 #include "Manager.h"
@@ -27,8 +27,10 @@ public:
     using ReconnectedCallback = std::function<void()>;
 
     Integration(std::shared_ptr<ha::Device> device,
-                  std::shared_ptr<ha::MqttClient> mqtt_client)
-        : mqtt_client_(mqtt_client), device_(device) {
+                  std::shared_ptr<ha::MqttClient> mqtt_client,
+                  std::string_view discovery_prefix = "homeassistant")
+        : mqtt_client_(mqtt_client), device_(device)
+        , discovery_prefix_{discovery_prefix} {
         manager_ = std::make_shared<ha::Manager>(device_, mqtt_client);
     }
 
@@ -58,9 +60,9 @@ public:
         std::lock_guard<std::mutex> lock(integration_mutex_);
         if (!manager_) return;
         
-        auto sensor = std::make_shared<ha::Sensor>(*device_, object_id, name, device_class, unit);
+        auto sensor = std::make_shared<ha::Sensor>(*device_, object_id, name, device_class, unit, discovery_prefix_);
         manager_->addComponent(sensor);
-        sensors_[type] = sensor;
+        sensors_[static_cast<size_t>(type)] = sensor;
     }
     
     void report(const std::vector<std::unique_ptr<Measurement>>& measurements) {
@@ -68,12 +70,11 @@ public:
         bool updated = false;
         for (const auto& measurement : measurements) {
             MeasurementType type = measurement->getDetails().getType();
+            size_t idx = static_cast<size_t>(type);
             
-            auto it = sensors_.find(type);
-            if (it == sensors_.end()) continue;
+            if (idx >= kMeasurementTypeCount || !sensors_[idx]) continue;
 
-            const auto& sensor = it->second;
-            sensor->updateState(measurement->valueToString());
+            sensors_[idx]->updateState(measurement->valueToString());
             updated = true;
         }
 
@@ -147,6 +148,7 @@ private:
     std::shared_ptr<ha::MqttClient> mqtt_client_;
     std::shared_ptr<ha::Device> device_;
     std::shared_ptr<ha::Manager> manager_;
+    std::string discovery_prefix_;
     
     std::shared_ptr<ha::Fan> fan_;
     std::shared_ptr<ha::Switch> display_switch_;
@@ -154,7 +156,8 @@ private:
     std::shared_ptr<ha::Number> report_interval_;
     std::shared_ptr<ha::Sensor> ip_sensor_;
 
-    std::map<MeasurementType, std::shared_ptr<ha::Sensor>> sensors_;
+    static constexpr size_t kMeasurementTypeCount = 6; // Temperature, Humidity, PM1, PM25, PM10, CO2
+    std::array<std::shared_ptr<ha::Sensor>, kMeasurementTypeCount> sensors_{};
     bool needs_report_ = false;
     bool last_connected_state_ = false;
 
