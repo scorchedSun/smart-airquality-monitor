@@ -96,7 +96,7 @@ public:
         if (state_json.size() > 0 && !components_.empty()) {
             std::string payload;
             serializeJson(state_json, payload);
-            mqtt_client_->publish(components_.front()->getStateTopic().c_str(), payload.c_str());
+            mqtt_client_->publish(components_.front()->getStateTopic().c_str(), payload.c_str(), true);
         }
     }
 };

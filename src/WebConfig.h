@@ -366,6 +366,21 @@ public:
             ESP.restart();
         });
 
+        // ── Status Endpoint ──
+        server_.on("/api/status", HTTP_GET, [](AsyncWebServerRequest* request) {
+            StaticJsonDocument<256> doc;
+            doc["uptime_s"] = millis() / 1000;
+            doc["free_heap"] = ESP.getFreeHeap();
+            doc["wifi_rssi"] = WiFi.RSSI();
+            doc["wifi_connected"] = WiFi.isConnected();
+            doc["ip"] = WiFi.localIP().toString();
+            doc["mac"] = WiFi.macAddress();
+
+            std::string json;
+            serializeJson(doc, json);
+            request->send(200, "application/json", json.c_str());
+        });
+
         // ── Firmware Update Page ──
         server_.on("/update", HTTP_GET, [](AsyncWebServerRequest* request) {
             request->send(200, "text/html", getUpdatePage());

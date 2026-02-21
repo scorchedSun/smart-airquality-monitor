@@ -9,6 +9,7 @@
 #include <mutex>
 #include "MqttClient.h"
 #include "Manager.h"
+#include "StateReporter.h"
 #include "Fan.h"
 #include "Switch.h"
 #include "Number.h"
@@ -32,6 +33,7 @@ public:
         : mqtt_client_(mqtt_client), device_(device)
         , discovery_prefix_{discovery_prefix} {
         manager_ = std::make_shared<ha::Manager>(device_, mqtt_client);
+        state_reporter_ = std::make_unique<ha::StateReporter>(device_, mqtt_client_, manager_);
     }
 
     void begin() {
@@ -51,8 +53,7 @@ public:
     }
 
     void setReconnectedCallback(ReconnectedCallback cb) {
-        std::lock_guard<std::mutex> lock(integration_mutex_);
-        reconnected_cb_ = cb;
+        state_reporter_->setReconnectedCallback(cb);
     }
 
     void addSensor(MeasurementType type, std::string_view object_id, std::string_view name, 
@@ -79,37 +80,20 @@ public:
         }
 
         if (updated) {
-            needs_report_ = true;
+            state_reporter_->requestReport();
+        }
+    }
+
+    void updateSensorHealth(std::string_view health_status) {
+        std::lock_guard<std::mutex> lock(integration_mutex_);
+        if (health_sensor_) {
+            health_sensor_->updateState(health_status);
+            state_reporter_->requestReport();
         }
     }
 
     void loop() {
-        std::unique_lock<std::mutex> lock(integration_mutex_);
-        
-        if (mqtt_client_ && mqtt_client_->isConnected()) {
-            if (!last_connected_state_) {
-                last_connected_state_ = true;
-                Logger::getInstance().log(Logger::Level::Info, "HAIntegration: MQTT Reconnected");
-                if (reconnected_cb_) {
-                    lock.unlock();
-                    reconnected_cb_();
-                    lock.lock();
-                }
-                // Publish online status
-                if (device_) {
-                    mqtt_client_->publish(device_->getAvailabilityTopic(), device_->getAvailabilityPayloadOnline(), true);
-                }
-            }
-            
-            if (manager_) manager_->reportState(); 
-            
-            if (needs_report_) {
-                if (manager_) manager_->reportState(true);
-                needs_report_ = false;
-            }
-        } else {
-            last_connected_state_ = false;
-        }
+        state_reporter_->loop();
     }
 
     void syncState(bool display_enabled, uint32_t display_interval_ms, 
@@ -124,14 +108,14 @@ public:
             fan_->updateSpeed(fan_speed);
         }
         
-        if (manager_) manager_->reportState(true);
+        state_reporter_->forceReport();
     }
     
     void updateIpAddress(std::string_view ip) {
         std::lock_guard<std::mutex> lock(integration_mutex_);
         if (ip_sensor_) {
             ip_sensor_->updateState(ip);
-            if (manager_) manager_->reportState(true);
+            state_reporter_->forceReport();
         }
     }
 
@@ -148,6 +132,7 @@ private:
     std::shared_ptr<ha::MqttClient> mqtt_client_;
     std::shared_ptr<ha::Device> device_;
     std::shared_ptr<ha::Manager> manager_;
+    std::unique_ptr<ha::StateReporter> state_reporter_;
     std::string discovery_prefix_;
     
     std::shared_ptr<ha::Fan> fan_;
@@ -155,16 +140,14 @@ private:
     std::shared_ptr<ha::Number> display_interval_;
     std::shared_ptr<ha::Number> report_interval_;
     std::shared_ptr<ha::Sensor> ip_sensor_;
+    std::shared_ptr<ha::Sensor> health_sensor_;
 
-    static constexpr size_t kMeasurementTypeCount = 6; // Temperature, Humidity, PM1, PM25, PM10, CO2
+    static constexpr size_t kMeasurementTypeCount = 6;
     std::array<std::shared_ptr<ha::Sensor>, kMeasurementTypeCount> sensors_{};
-    bool needs_report_ = false;
-    bool last_connected_state_ = false;
 
     FanCallback fan_cb_;
     DisplayCallback display_cb_;
     ConfigSaveCallback config_save_cb_;
-    ReconnectedCallback reconnected_cb_;
 
     std::vector<std::pair<MeasurementType, std::shared_ptr<ha::Sensor>>> pending_sensors_;
     
@@ -182,7 +165,7 @@ private:
                 Logger::getInstance().log(Logger::Level::Info, "Display %s via MQTT", state ? "enabled" : "disabled");
                 
                 if (display_switch_) display_switch_->updateState(state);
-                if (manager_) manager_->reportState(true);
+                state_reporter_->forceReport();
             });
         manager_->addComponent(display_switch_);
 
@@ -192,7 +175,7 @@ private:
                 if (config_save_cb_) config_save_cb_(cfg::keys::display_interval, (int)val);
                 
                 Logger::getInstance().log(Logger::Level::Info, "Display interval: %.1fs", val);
-                if (manager_) manager_->reportState(true);
+                state_reporter_->forceReport();
             });
         manager_->addComponent(display_interval_);
 
@@ -202,14 +185,14 @@ private:
                 if (config_save_cb_) config_save_cb_(cfg::keys::report_interval, (int)val);
                 
                 Logger::getInstance().log(Logger::Level::Info, "Report interval: %.1fm", val);
-                if (manager_) manager_->reportState(true);
+                state_reporter_->forceReport();
             });
         manager_->addComponent(report_interval_);
 
         // Fan
         fan_ = std::make_shared<ha::Fan>(*device_, "fan", "Fan",
             [this](bool state) {
-                if (fan_cb_) fan_cb_(state, 0); // 0 = special value "keep current speed"
+                if (fan_cb_) fan_cb_(state, 0);
             },
             [this](uint8_t speed) {
                 if (fan_cb_) fan_cb_(true, speed);
@@ -218,8 +201,13 @@ private:
 
         // IP Sensor
         ip_sensor_ = std::make_shared<ha::Sensor>(*device_, "ip_address", "IP Address",
-            "", "", "homeassistant", "diagnostic", "mdi:ip-network-outline");
+            "", "", discovery_prefix_, "diagnostic", "mdi:ip-network-outline");
         manager_->addComponent(ip_sensor_);
+
+        // Sensor Health Diagnostic
+        health_sensor_ = std::make_shared<ha::Sensor>(*device_, "sensor_health", "Sensor Health",
+            "", "", discovery_prefix_, "diagnostic", "mdi:heart-pulse");
+        manager_->addComponent(health_sensor_);
     }
 };
 
